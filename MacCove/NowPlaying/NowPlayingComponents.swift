@@ -20,6 +20,9 @@ struct ArtworkView: View {
     let cornerRadius: CGFloat
     /// The track the art belongs to. `nil` turns the flip off.
     var flipID: String?
+    /// Shown whole, without a tile, when there's no artwork: the playing
+    /// app's icon, as on the iPhone.
+    var fallbackIcon: NSImage?
 
     /// What's drawn. Lags `image` while the old art turns away, so the new
     /// art only appears on the far side of the flip.
@@ -29,11 +32,12 @@ struct ArtworkView: View {
     @State private var latestImage: NSImage?
     @State private var isFlipping = false
 
-    init(image: NSImage?, size: CGFloat, cornerRadius: CGFloat, flipID: String? = nil) {
+    init(image: NSImage?, size: CGFloat, cornerRadius: CGFloat, flipID: String? = nil, fallbackIcon: NSImage? = nil) {
         self.image = image
         self.size = size
         self.cornerRadius = cornerRadius
         self.flipID = flipID
+        self.fallbackIcon = fallbackIcon
         _displayedImage = State(initialValue: image)
         _latestImage = State(initialValue: image)
     }
@@ -45,6 +49,11 @@ struct ArtworkView: View {
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fill)
+            } else if let fallbackIcon {
+                Image(nsImage: fallbackIcon)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
             } else {
                 Color(white: 0.2)
                 Image(systemName: "music.note")
@@ -221,8 +230,10 @@ struct PlaybackProgressView: View {
         Group {
             if nowPlaying.isLive {
                 liveRow
-            } else {
+            } else if nowPlaying.hasTimeline {
                 timeline
+            } else {
+                noTimelineRow
             }
         }
         // Line the clock up with the player's own playhead while visible:
@@ -257,6 +268,17 @@ struct PlaybackProgressView: View {
         .frame(height: Self.height)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Live")
+    }
+
+    /// Some web players, Netflix's among them, report no length or
+    /// position: an empty, still bar with no times, since there's nothing
+    /// to count.
+    private var noTimelineRow: some View {
+        Capsule()
+            .fill(.white.opacity(0.2))
+            .frame(height: 5)
+            .frame(height: Self.height)
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder
