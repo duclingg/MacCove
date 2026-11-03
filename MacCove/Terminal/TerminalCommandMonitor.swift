@@ -12,7 +12,9 @@ import AppKit
 final class TerminalCommandMonitor {
     enum Event {
         case started
+        /// Ended well, or ended in front of you: shown without opening.
         case finished
+        /// Ended badly while its terminal was in the background.
         case failed
         /// Dismissed, interrupted, or its shell went away.
         case ended
@@ -48,6 +50,9 @@ final class TerminalCommandMonitor {
     private(set) var command: Command?
 
     @ObservationIgnored var onEvent: ((Event) -> Void)?
+    /// Whether the island is open or under the cursor, when a watched
+    /// result waits to leave until you're done with it.
+    @ObservationIgnored var isInUse: () -> Bool = { false }
 
     /// Commands still running, the shown one among them, by id.
     @ObservationIgnored private var running: [String: Command] = [:]
@@ -55,7 +60,13 @@ final class TerminalCommandMonitor {
     /// end doesn't bring one back.
     @ObservationIgnored private var endedIDs: Set<String> = []
     @ObservationIgnored private var shellCheck: Task<Void, Never>?
+    /// Takes away a result that ended in front of you.
+    @ObservationIgnored private var resultDismissal: Task<Void, Never>?
+    /// A watched result whose time is up, kept while the island was in use.
+    @ObservationIgnored private var dueResultID: String?
 
+    /// How long a result stays when you watched the command end.
+    private static let watchedResultDuration: Duration = .seconds(3)
     /// What ^C leaves: the command was stopped on purpose, not failed.
     private static let interruptedExitCode: Int32 = 130
     /// How often running commands' shells are checked, in case a terminal
@@ -143,6 +154,23 @@ final class TerminalCommandMonitor {
         return group > 0 && group != info.kp_eproc.e_pgid ? group : nil
     }
 
+    /// Takes away a watched result whose time is up, after `delay`, unless
+    /// the island is open or under the cursor; then it waits to be asked
+    /// again.
+    func leaveIfDue(after delay: Duration = .zero) {
+        guard let id = dueResultID, command?.id == id else {
+            dueResultID = nil
+            return
+        }
+        resultDismissal?.cancel()
+        resultDismissal = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self, self.dueResultID == id, self.command?.id == id, !self.isInUse() else { return }
+            self.dueResultID = nil
+            self.dismiss()
+        }
+    }
+
     // MARK: - Reports from the hook
 
     /// The newest command takes the island, over a result still showing.
@@ -154,8 +182,9 @@ final class TerminalCommandMonitor {
         watchShells()
     }
 
-    /// Pops up only when the command's terminal is in the background, as
-    /// in front you've seen it end. ^C just ends it.
+    /// Opens by itself only when the command's terminal is in the
+    /// background. In front, you've seen it end, so the result shows in the
+    /// pill for a moment and leaves. ^C just ends it.
     private func commandFinished(id: String, exitCode: Int32, fallback: Command) {
         endedIDs.insert(id)
         var finished = running.removeValue(forKey: id) ?? fallback
@@ -163,7 +192,7 @@ final class TerminalCommandMonitor {
 
         let isTerminalInFront = finished.appBundleIdentifier != nil
             && NSWorkspace.shared.frontmostApplication?.bundleIdentifier == finished.appBundleIdentifier
-        guard exitCode != Self.interruptedExitCode, !isTerminalInFront else {
+        guard exitCode != Self.interruptedExitCode else {
             if command?.id == id {
                 dismiss()
             }
@@ -172,6 +201,18 @@ final class TerminalCommandMonitor {
 
         finished.phase = exitCode == 0 ? .finished : .failed(exitCode: exitCode)
         command = finished
+        resultDismissal?.cancel()
+        guard !isTerminalInFront else {
+            onEvent?(.finished)
+            dueResultID = nil
+            resultDismissal = Task { [weak self] in
+                try? await Task.sleep(for: Self.watchedResultDuration)
+                guard !Task.isCancelled, let self else { return }
+                self.dueResultID = id
+                self.leaveIfDue()
+            }
+            return
+        }
         onEvent?(exitCode == 0 ? .finished : .failed)
     }
 

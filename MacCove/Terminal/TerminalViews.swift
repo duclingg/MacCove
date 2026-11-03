@@ -30,10 +30,13 @@ private struct TerminalGlyph: View {
     }
 }
 
-/// White, or red once a command has failed, as in the pill and bubbles.
+/// White while it runs, then green or red for how it ended.
 private func glyphColor(_ command: TerminalCommandMonitor.Command?) -> Color {
-    if case .failed? = command?.phase { return .islandError }
-    return .white
+    switch command?.phase {
+    case .finished?: .islandSucceeded
+    case .failed?: .islandError
+    case .running?, nil: .white
+    }
 }
 
 /// "1:24" up to an hour, then "1:02:03".
@@ -179,8 +182,7 @@ struct TerminalExpandedView: View {
             Button {
                 terminal.showInTerminal()
             } label: {
-                // On a tile, green too once it's finished.
-                TerminalGlyph(color: command.phase == .finished ? .islandSucceeded : glyphColor(command), size: 26)
+                TerminalGlyph(color: glyphColor(command), size: 26)
                     .frame(width: 44, height: 44)
                     .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.12)))
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

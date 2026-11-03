@@ -225,17 +225,21 @@ final class NotchWindowController {
             }
         }
 
-        guard viewModel.state != .idle else {
-            setReceivesMouse(false)
-            viewModel.setHovering(nil)
-            return
-        }
-
         // Also reaches 1pt past the edge. Without it, a cursor parked in the
         // topmost row would count as over the strip but not the island, so
         // the island would keep tucking away and coming back.
         let island = viewModel.geometry.size
         let islandFrame = NSRect(x: screen.frame.midX - island.width / 2, y: top - island.height, width: island.width, height: island.height + 1)
+
+        // An idle notch only grows under the cursor. Clicks there still go
+        // through, to the menu bar.
+        guard viewModel.state != .idle else {
+            setReceivesMouse(false)
+            viewModel.setHovering(nil)
+            viewModel.setIdleNotchHovered(viewModel.hasPhysicalNotch && islandFrame.contains(mouse))
+            return
+        }
+        viewModel.setIdleNotchHovered(false)
         var hovered = islandFrame.contains(mouse) ? viewModel.primaryActivity : nil
         if hovered == nil {
             hovered = viewModel.bubbles.flatMap(\.segments).first { segment in

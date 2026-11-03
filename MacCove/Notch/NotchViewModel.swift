@@ -25,6 +25,8 @@ enum IslandActivity: Hashable {
     case terminal
     /// A Claude Code session: working, waiting for approval, finished.
     case claudeCode
+    /// "Copied" for a moment, or the last few copies.
+    case clipboard
     case nowPlaying
 
     /// How long a battery alert stays; the others leave by themselves.
@@ -32,7 +34,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .clipboard, .nowPlaying: .zero
         }
     }
 }
@@ -84,6 +86,7 @@ final class NotchViewModel {
     let xcode: XcodeBuildMonitor
     let terminal: TerminalCommandMonitor
     let claude: ClaudeCodeMonitor
+    let clipboard: ClipboardMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
@@ -92,6 +95,9 @@ final class NotchViewModel {
 
     /// The island or bubble under the cursor.
     private(set) var hovered: IslandActivity?
+    /// The cursor is on the notch with nothing running. It grows a little,
+    /// as the pill does, but never takes the click.
+    private(set) var isIdleNotchHovered = false
     private var presentation: IslandState = .compact
     /// What was clicked open, which leads while the island is expanded.
     private var expandedActivity: IslandActivity?
@@ -111,7 +117,8 @@ final class NotchViewModel {
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
     @ObservationIgnored private var alertTask: Task<Void, Never>?
-    /// Closes a failure that opened by itself.
+    /// Closes a failure, or the clipboard history from the menu bar, that
+    /// opened by itself.
     @ObservationIgnored private var failureCollapseTask: Task<Void, Never>?
 
     init(
@@ -121,7 +128,8 @@ final class NotchViewModel {
         signIn: SignInMonitor,
         xcode: XcodeBuildMonitor,
         terminal: TerminalCommandMonitor,
-        claude: ClaudeCodeMonitor
+        claude: ClaudeCodeMonitor,
+        clipboard: ClipboardMonitor
     ) {
         self.nowPlaying = nowPlaying
         self.audioRoute = audioRoute
@@ -130,6 +138,7 @@ final class NotchViewModel {
         self.xcode = xcode
         self.terminal = terminal
         self.claude = claude
+        self.clipboard = clipboard
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
             self?.playbackChanged(playing: playing)
@@ -146,8 +155,21 @@ final class NotchViewModel {
         terminal.onEvent = { [weak self] event in
             self?.terminalEvent(event)
         }
+        terminal.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.isHovering || self.presentation == .expanded
+        }
         claude.onEvent = { [weak self] event in
             self?.claudeEvent(event)
+        }
+        clipboard.onEvent = { [weak self] event in
+            self?.clipboardEvent(event)
+        }
+        // Only the clipboard's own pill or details: a copy made while you're
+        // using the player doesn't wait for you to finish with it.
+        clipboard.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.hovered == .clipboard || (self.presentation == .expanded && self.expandedActivity == .clipboard)
         }
     }
 
@@ -170,10 +192,16 @@ final class NotchViewModel {
         // A build goes ahead of music, as on the iPhone, where a live
         // activity you're waiting on leads. An agent waiting for your
         // answer goes ahead of everything, even over a full-screen app,
-        // since it can't go on without you.
+        // since it can't go on without you. A copy leads for its moment, as
+        // an alert does, but in an ordinary pill: what it displaces only
+        // moves to a bubble, so it takes no more room than a bubble of its
+        // own would, and a bubble can be hidden by the front app's menus.
         var running: [IslandActivity] = []
         if claude.needsAnswer {
             running.append(.claudeCode)
+        }
+        if isShowingAll, clipboard.shown != nil {
+            running.append(.clipboard)
         }
         if isShowingAll, xcode.build != nil {
             running.append(.xcode)
@@ -235,7 +263,12 @@ final class NotchViewModel {
         let grow: CGSize = hovered != nil && hovered == primary ? Self.hoverGrowth : .zero
         switch state {
         case .idle where hasPhysicalNotch:
-            return IslandGeometry(size: notch, cornerRadius: 10, isLifted: false)
+            let idleGrow = isIdleNotchHovered ? Self.hoverGrowth : .zero
+            return IslandGeometry(
+                size: CGSize(width: notch.width + idleGrow.width, height: notch.height + idleGrow.height),
+                cornerRadius: Self.notchCornerRadius,
+                isLifted: false
+            )
         case .idle:
             // Keeps its compact shape so it slides out of sight whole,
             // rather than shrinking as it goes.
@@ -275,6 +308,7 @@ final class NotchViewModel {
             case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
             case .claudeCode?: ClaudeCodeExpandedView.bodyHeight(for: claude.session)
+            case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
             default: BatteryExpandedView.bodyHeight
             }
             return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
@@ -354,7 +388,12 @@ final class NotchViewModel {
     /// Height of the invisible strip along the top edge that brings a
     /// tucked-away island back on screens without a notch.
     static let hoverStripHeight: CGFloat = 5
-    static let compactCornerRadius: CGFloat = 12
+    /// The hardware notch's bottom corners, by eye: macOS doesn't say. Every
+    /// shape uses it, so the pill, the bubbles and the open island all
+    /// round off like the notch they grow out of.
+    static let notchCornerRadius: CGFloat = 10
+    /// The pill and the bubbles beside it.
+    static let compactCornerRadius = notchCornerRadius
     /// How much the pill grows under the cursor.
     static let hoverGrowth = CGSize(width: 8, height: 3)
     /// Between the pill and a bubble, as in the design. Each has an 8pt
@@ -388,7 +427,7 @@ final class NotchViewModel {
         return layout.sideInset * 2 + layout.artSize * 2 + bubbleRouteGap
     }
     static let expandedWidth: CGFloat = 420
-    static let expandedCornerRadius: CGFloat = 32
+    static let expandedCornerRadius = notchCornerRadius
     /// Gap from the island's sides to the content.
     static let expandedInset: CGFloat = 20
     /// Gap from the notch to the artwork. Small, since the notch row above
@@ -410,7 +449,7 @@ final class NotchViewModel {
     /// Low Power Mode button with their gaps.
     static let alertTopGap: CGFloat = 8
     static let alertBodyHeight: CGFloat = alertTopGap + 57 + 14
-    static let alertCornerRadius: CGFloat = 38
+    static let alertCornerRadius = notchCornerRadius
 
     static func compactWidth(notch: CGSize) -> CGFloat {
         notch.width + CompactLayout(notch: notch).wingWidth * 2
@@ -455,7 +494,14 @@ final class NotchViewModel {
             failureCollapseTask?.cancel()
         } else if presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
+            terminal.leaveIfDue(after: .seconds(1.2))
+            clipboard.leaveIfDue(after: .seconds(1.2))
         }
+    }
+
+    func setIdleNotchHovered(_ isHovered: Bool) {
+        guard isHovered != isIdleNotchHovered else { return }
+        isIdleNotchHovered = isHovered
     }
 
     /// Entering full screen closes the player too, so it doesn't come back
@@ -572,6 +618,33 @@ final class NotchViewModel {
         }
     }
 
+    /// A new copy closes the history, unless the cursor is on it.
+    private func clipboardEvent(_ event: ClipboardMonitor.Event) {
+        switch event {
+        case .copied: activityStarted(.clipboard)
+        case .ended: activityEnded(.clipboard)
+        }
+    }
+
+    /// From the menu bar: opens the history over whatever else is open,
+    /// then shrinks back to the pill after a while if the cursor never
+    /// comes, and leaves.
+    func showClipboardHistory() {
+        guard !isSigningIn, batteryAlert == nil else { return }
+        clipboard.showHistory()
+        collapseTask?.cancel()
+        failureCollapseTask?.cancel()
+        expandedActivity = .clipboard
+        presentation = .expanded
+        failureCollapseTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.failureOpenDuration)
+            guard !Task.isCancelled, let self, !self.isHovering,
+                  self.presentation == .expanded, self.expandedActivity == .clipboard else { return }
+            self.presentation = .compact
+            self.clipboard.leaveIfDue(after: .seconds(1.2))
+        }
+    }
+
     /// Takes over the island, over anything else open, as an incoming call
     /// does on the iPhone. Only the lock screen and a battery alert come
     /// first.
@@ -662,6 +735,8 @@ final class NotchViewModel {
             self.presentation = .compact
             self.isRevealedByHover = false
             self.scheduleAlertDismissal(after: .seconds(1.2))
+            self.terminal.leaveIfDue(after: .seconds(1.2))
+            self.clipboard.leaveIfDue(after: .seconds(1.2))
         }
     }
 }
