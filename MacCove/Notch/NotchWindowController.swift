@@ -13,6 +13,8 @@ final class NotchWindowController {
     private var screen: NSScreen?
     private var eventMonitors: [Any] = []
     private var screenObserver: NSObjectProtocol?
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var fullScreenCheck: Task<Void, Never>?
 
     init(viewModel: NotchViewModel) {
         self.viewModel = viewModel
@@ -44,6 +46,33 @@ final class NotchWindowController {
         }) {
             eventMonitors.append(local)
         }
+
+        // Going in and out of full screen switches Spaces; switching apps can
+        // bring a full-screen one to the front.
+        let workspace = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
+            workspaceObservers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scheduleFullScreenCheck() }
+            })
+        }
+        scheduleFullScreenCheck()
+    }
+
+    /// Checks now, and again once the full-screen animation has had time to
+    /// finish and the window covers the display.
+    private func scheduleFullScreenCheck() {
+        checkFullScreen()
+        fullScreenCheck?.cancel()
+        fullScreenCheck = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled else { return }
+            self?.checkFullScreen()
+        }
+    }
+
+    private func checkFullScreen() {
+        guard let screen, let isFullScreen = FullScreenDetector.isFrontmostAppFullScreen(on: screen) else { return }
+        viewModel.setFullScreenActive(isFullScreen)
     }
 
     private func reposition() {
@@ -60,6 +89,7 @@ final class NotchWindowController {
             height: size.height
         )
         panel.setFrame(frame, display: true)
+        checkFullScreen()
     }
 
     private func updateMouse() {

@@ -81,33 +81,49 @@ struct NowPlayingExpandedView: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            ArtworkView(image: nowPlaying.artwork, size: 64, cornerRadius: 8, flipID: nowPlaying.track?.id)
-            VStack(alignment: .leading, spacing: 0) {
-                if let route {
-                    RouteLabel(source: sourceName, destination: route.destination)
+            // Clicking the artwork or the text opens the app that's playing,
+            // like tapping the iPhone's player.
+            Button {
+                nowPlaying.openSourceApp()
+            } label: {
+                HStack(spacing: 14) {
+                    ArtworkView(image: nowPlaying.artwork, size: 64, cornerRadius: 8, flipID: nowPlaying.track?.id)
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let route {
+                            RouteLabel(source: sourceName, destination: route.destination)
+                        }
+                        TrackTitle(track: nowPlaying.track)
+                        MarqueeText(text: nowPlaying.subtitle, font: .system(size: 17))
+                            .foregroundStyle(.islandSecondary)
+                            .frame(height: 22)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                TrackTitle(track: nowPlaying.track)
-                Text(nowPlaying.track?.artist ?? "")
-                    .font(.system(size: 17))
-                    .foregroundStyle(.islandSecondary)
-                    .lineLimit(1)
-                    .frame(height: 22)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens the app that's playing")
             AudioBars(isPlaying: nowPlaying.isPlaying, color: nowPlaying.tint)
         }
         .frame(height: 64)
     }
 
-    /// Transport centred on the island. Apple Music's star, when it applies,
-    /// sits at the leading edge, and the device audio is playing on at the
-    /// trailing edge, neither pushing the transport off centre.
+    /// Transport centred on the island: previous and next track, or
+    /// 15-second skips for podcasts and audiobooks. Apple Music's star, when
+    /// it applies, sits at the leading edge, and the device audio is playing
+    /// on at the trailing edge, neither pushing the transport off centre.
     private var controls: some View {
         ZStack {
             HStack(spacing: 26) {
-                IslandIconButton(systemName: "backward.fill", size: 26, label: "Previous track") {
-                    nowPlaying.previousTrack()
+                if nowPlaying.isSpokenAudio {
+                    IslandIconButton(systemName: "gobackward.15", size: 24, label: "Back 15 seconds") {
+                        nowPlaying.skipBackward()
+                    }
+                } else {
+                    IslandIconButton(systemName: "backward.fill", size: 26, label: "Previous track") {
+                        nowPlaying.previousTrack()
+                    }
                 }
                 IslandIconButton(
                     systemName: nowPlaying.isPlaying ? "pause.fill" : "play.fill",
@@ -116,8 +132,14 @@ struct NowPlayingExpandedView: View {
                 ) {
                     nowPlaying.togglePlayPause()
                 }
-                IslandIconButton(systemName: "forward.fill", size: 26, label: "Next track") {
-                    nowPlaying.nextTrack()
+                if nowPlaying.isSpokenAudio {
+                    IslandIconButton(systemName: "goforward.15", size: 24, label: "Forward 15 seconds") {
+                        nowPlaying.skipForward()
+                    }
+                } else {
+                    IslandIconButton(systemName: "forward.fill", size: 26, label: "Next track") {
+                        nowPlaying.nextTrack()
+                    }
                 }
             }
 
@@ -148,19 +170,18 @@ struct NowPlayingExpandedView: View {
     }
 }
 
-/// The song name with Apple's explicit badge after it. The badge never
-/// truncates; the title does.
+/// The song name with Apple's explicit badge after it. A long title
+/// scrolls; the badge stays put.
 struct TrackTitle: View {
     let track: NowPlayingModel.Track?
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(track?.title ?? "")
-                .font(.system(size: 17, weight: .semibold))
-                .lineLimit(1)
+            MarqueeText(text: track?.title ?? "", font: .system(size: 17, weight: .semibold))
             if track?.isExplicit == true {
                 Image(systemName: "e.square.fill")
                     .font(.system(size: 15))
+                    .fixedSize()
                     .accessibilityLabel("Explicit")
             }
         }
@@ -168,22 +189,23 @@ struct TrackTitle: View {
     }
 }
 
-/// "MacBook Pro → HomePod mini", the iPhone's grey line above the title.
+/// "MacBook Pro → HomePod mini", the iPhone's caption above the title:
+/// smaller and dimmer than the artist line, so it reads as context.
 private struct RouteLabel: View {
     let source: String
     let destination: String
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 3) {
             Text(source)
             Image(systemName: "arrow.right")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
             Text(destination)
         }
-        .font(.system(size: 13, weight: .medium))
-        .foregroundStyle(.islandSecondary)
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(.islandTertiary)
         .lineLimit(1)
-        .frame(height: 17)
+        .frame(height: 15)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Playing from \(source) on \(destination)")
     }

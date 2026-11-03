@@ -66,6 +66,33 @@ final class NowPlayingModel {
         track?.bundleIdentifier == MusicScripting.bundleIdentifier ? .star : nil
     }
 
+    /// Podcast and audiobook apps, which get 15-second skips instead of
+    /// previous and next track, as on the iPhone.
+    private static let spokenAudioApps: Set<String> = [
+        "com.apple.podcasts",
+        "com.apple.iBooksX",
+        "au.com.shiftyjelly.podcasts",
+        "fm.overcast.overcast",
+    ]
+
+    var isSpokenAudio: Bool {
+        guard let bundleIdentifier = track?.bundleIdentifier else { return false }
+        return Self.spokenAudioApps.contains(bundleIdentifier)
+    }
+
+    /// Radio and live video report no length.
+    var isLive: Bool {
+        hasMedia && duration <= 0
+    }
+
+    /// "Artist • Album", leaving out whichever the app doesn't report.
+    var subtitle: String {
+        guard let track else { return "" }
+        return [track.artist, track.album]
+            .filter { !$0.isEmpty }
+            .joined(separator: " • ")
+    }
+
     func start() {
         controller.onTrackInfoReceived = { [weak self] info in
             MainActor.assumeIsolated { self?.apply(info) }
@@ -115,6 +142,28 @@ final class NowPlayingModel {
     func seek(to time: TimeInterval) {
         reanchor(at: time)
         controller.setTime(seconds: time)
+    }
+
+    func skipBackward() {
+        reanchor(at: max(elapsed(at: Date()) - 15, 0))
+        controller.goBackFifteenSeconds()
+    }
+
+    func skipForward() {
+        let ahead = elapsed(at: Date()) + 15
+        reanchor(at: duration > 0 ? min(ahead, duration) : ahead)
+        controller.skipFifteenSeconds()
+    }
+
+    /// Brings the app that's playing to the front, like tapping the
+    /// iPhone's player. For a browser that's the browser, not the tab.
+    func openSourceApp() {
+        guard let bundleIdentifier = track?.bundleIdentifier else { return }
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first {
+            running.activate()
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
+        }
     }
 
     /// Asks the playing app whether the current track is saved.

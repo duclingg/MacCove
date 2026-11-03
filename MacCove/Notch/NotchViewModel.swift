@@ -32,6 +32,9 @@ final class NotchViewModel {
     /// Brought back on purpose through the hover strip while it would
     /// otherwise be tucked away.
     private var isRevealedByHover = false
+    /// A full-screen app is in front on this display: the island steps
+    /// aside, as on the iPhone.
+    private var isFullScreenActive = false
 
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
@@ -47,7 +50,10 @@ final class NotchViewModel {
 
     var state: IslandState {
         guard nowPlaying.hasMedia else { return .idle }
-        if presentation == .compact, isDismissedForPause, !isRevealedByHover { return .idle }
+        // Brought back on purpose: shown whatever else is going on.
+        if isRevealedByHover { return presentation }
+        if isFullScreenActive { return .idle }
+        if presentation == .compact, isDismissedForPause { return .idle }
         return presentation
     }
 
@@ -126,6 +132,18 @@ final class NotchViewModel {
         guard hovering != isHovering else { return }
         isHovering = hovering
         scheduleCollapseIfNeeded()
+    }
+
+    /// Entering full screen closes the player too, so it doesn't come back
+    /// expanded when you leave.
+    func setFullScreenActive(_ active: Bool) {
+        guard active != isFullScreenActive else { return }
+        isFullScreenActive = active
+        if active {
+            collapseTask?.cancel()
+            presentation = .compact
+            isRevealedByHover = false
+        }
     }
 
     /// The cursor reached the hover strip: slide the island down under it.

@@ -5,6 +5,11 @@ extension ShapeStyle where Self == Color {
     static var islandSecondary: Color {
         Color(red: 235 / 255, green: 235 / 255, blue: 245 / 255).opacity(0.6)
     }
+
+    /// Apple's tertiary label colour on dark material, for captions.
+    static var islandTertiary: Color {
+        Color(red: 235 / 255, green: 235 / 255, blue: 245 / 255).opacity(0.38)
+    }
 }
 
 /// Album art that flips over like a card, around its vertical axis, when
@@ -204,6 +209,49 @@ struct PlaybackProgressView: View {
     @State private var scrubFraction: Double?
 
     var body: some View {
+        Group {
+            if nowPlaying.isLive {
+                liveRow
+            } else {
+                timeline
+            }
+        }
+        // Line the clock up with the player's own playhead while visible:
+        // straight away, after play/pause, then every few seconds.
+        .task(id: "\(nowPlaying.track?.id ?? "")-\(nowPlaying.isPlaying)") {
+            while !Task.isCancelled {
+                await nowPlaying.syncPositionWithPlayer()
+                do {
+                    try await Task.sleep(for: .seconds(5))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    /// Radio and live video have no length: a full, still bar and a red
+    /// "LIVE", as on the iPhone.
+    private var liveRow: some View {
+        HStack(spacing: 10) {
+            Capsule()
+                .fill(.white.opacity(0.35))
+                .frame(height: 5)
+            HStack(spacing: 5) {
+                Circle()
+                    .frame(width: 6, height: 6)
+                Text("LIVE")
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Color(red: 1, green: 0.27, blue: 0.23))
+        }
+        .frame(height: Self.height)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Live")
+    }
+
+    @ViewBuilder
+    private var timeline: some View {
         // Redrawn continuously while playing so the bar glides and the clock
         // ticks the moment each second passes.
         let schedule = AnimationTimelineSchedule(
@@ -228,18 +276,6 @@ struct PlaybackProgressView: View {
             .font(.system(size: 13, weight: .medium).monospacedDigit())
             .foregroundStyle(.islandSecondary)
             .frame(height: Self.height)
-        }
-        // Line the clock up with the player's own playhead while visible:
-        // straight away, after play/pause, then every few seconds.
-        .task(id: "\(nowPlaying.track?.id ?? "")-\(nowPlaying.isPlaying)") {
-            while !Task.isCancelled {
-                await nowPlaying.syncPositionWithPlayer()
-                do {
-                    try await Task.sleep(for: .seconds(5))
-                } catch {
-                    return
-                }
-            }
         }
     }
 
@@ -280,5 +316,106 @@ struct PlaybackProgressView: View {
     static func format(_ time: TimeInterval) -> String {
         let seconds = max(Int(time.rounded(.down)), 0)
         return "\(seconds / 60):" + String(format: "%02d", seconds % 60)
+    }
+}
+
+/// One line of text that scrolls when it doesn't fit, like the iPhone's
+/// player: it rests, glides left until a second copy takes its place, and
+/// repeats, fading at the edges while it overflows. Text that fits stays
+/// still, and the view is only as wide as the text, so a badge after it
+/// sits right at the end.
+struct MarqueeText: View {
+    let text: String
+    let font: Font
+
+    @State private var textWidth: CGFloat = 0
+    @State private var boxWidth: CGFloat = 0
+    @State private var offset: CGFloat = 0
+
+    private static let gap: CGFloat = 36
+    private static let pointsPerSecond: CGFloat = 30
+    private static let pause: Duration = .seconds(2.5)
+
+    private var overflows: Bool {
+        textWidth > boxWidth + 0.5
+    }
+
+    var body: some View {
+        // Sizes the box: as wide as the text, or the space available.
+        Text(text)
+            .font(font)
+            .lineLimit(1)
+            .hidden()
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                boxWidth = width
+            }
+            .overlay(alignment: .leading) {
+                HStack(spacing: Self.gap) {
+                    label
+                    if overflows {
+                        label
+                    }
+                }
+                .offset(x: offset)
+            }
+            .clipped()
+            .mask {
+                LinearGradient(stops: fadeStops, startPoint: .leading, endPoint: .trailing)
+            }
+            .task(id: "\(text)|\(overflows)") {
+                await scroll()
+            }
+            .accessibilityElement()
+            .accessibilityLabel(text)
+    }
+
+    private var label: some View {
+        Text(text)
+            .font(font)
+            .lineLimit(1)
+            .fixedSize()
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                textWidth = width
+            }
+    }
+
+    /// Fades the trailing edge while text runs past it, and the leading edge
+    /// while it's scrolling.
+    private var fadeStops: [Gradient.Stop] {
+        let leading: CGFloat = overflows && offset < 0 ? 0.05 : 0
+        let trailing: CGFloat = overflows ? 0.06 : 0
+        return [
+            .init(color: leading > 0 ? .clear : .black, location: 0),
+            .init(color: .black, location: leading),
+            .init(color: .black, location: 1 - trailing),
+            .init(color: trailing > 0 ? .clear : .black, location: 1),
+        ]
+    }
+
+    private func scroll() async {
+        offset = 0
+        guard overflows else { return }
+        let distance = textWidth + Self.gap
+        let duration = Double(distance / Self.pointsPerSecond)
+        while !Task.isCancelled {
+            try? await Task.sleep(for: Self.pause)
+            guard !Task.isCancelled else { return }
+            withAnimation(.linear(duration: duration)) {
+                offset = -distance
+            }
+            try? await Task.sleep(for: .seconds(duration))
+            guard !Task.isCancelled else { return }
+            // The second copy is now exactly where the first started, so
+            // jumping back is invisible.
+            var reset = Transaction()
+            reset.disablesAnimations = true
+            withTransaction(reset) {
+                offset = 0
+            }
+        }
     }
 }

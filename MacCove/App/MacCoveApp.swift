@@ -3,9 +3,16 @@ import SwiftUI
 @main
 struct MacCoveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var launchAtLogin = LaunchAtLogin()
 
     var body: some Scene {
         MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled") {
+            Toggle("Launch at Login", isOn: Binding(
+                get: { launchAtLogin.isEnabled },
+                set: { launchAtLogin.setEnabled($0) }
+            ))
+            .onAppear { launchAtLogin.refresh() }
+            Divider()
             Button("Quit MacCove") {
                 NSApp.terminate(nil)
             }
