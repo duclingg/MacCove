@@ -35,6 +35,7 @@ final class BatteryMonitor {
     @ObservationIgnored private var runLoopSource: CFRunLoopSource?
     @ObservationIgnored private var powerStateObserver: NSObjectProtocol?
     @ObservationIgnored private var isChangingLowPowerMode = false
+    @ObservationIgnored private let helper = LowPowerModeHelperClient()
 
     func start() {
         refresh(announce: false)
@@ -59,27 +60,15 @@ final class BatteryMonitor {
         }
     }
 
-    /// Only an administrator can change Low Power Mode, so this asks for a
-    /// password, as System Settings would. The change itself arrives through
-    /// the usual notification.
+    /// Only root can change Low Power Mode, so MacCoveHelper does it. The
+    /// change itself arrives through the usual notification.
     func setLowPowerMode(_ enabled: Bool) {
         guard !isChangingLowPowerMode else { return }
         isChangingLowPowerMode = true
-
-        let command = "/usr/bin/pmset -a lowpowermode \(enabled ? 1 : 0)"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", "do shell script \"\(command)\" with administrator privileges"]
-        process.terminationHandler = { [weak self] _ in
-            Task { @MainActor in
-                self?.isChangingLowPowerMode = false
-                self?.lowPowerModeChanged()
-            }
-        }
-        do {
-            try process.run()
-        } catch {
+        Task {
+            _ = await helper.setLowPowerMode(enabled)
             isChangingLowPowerMode = false
+            lowPowerModeChanged()
         }
     }
 

@@ -3,7 +3,8 @@ import SwiftUI
 extension Color {
     /// The iPhone's charging green, for text and the battery's fill.
     static let batteryCharging = Color(red: 137 / 255, green: 251 / 255, blue: 178 / 255)
-    static let batteryLowPower = Color(red: 245 / 255, green: 201 / 255, blue: 77 / 255)
+    /// The iPhone's Low Power Mode yellow, sampled from its alert.
+    static let batteryLowPower = Color(red: 254 / 255, green: 198 / 255, blue: 46 / 255)
     static let batteryLow = Color(red: 1, green: 98 / 255, blue: 89 / 255)
 }
 
@@ -121,6 +122,11 @@ struct LowBatteryAlertView: View {
     let battery: BatteryMonitor
     let notchHeight: CGFloat
 
+    /// Sampled from the iPhone's alert: a softer yellow than the button,
+    /// and a grey dimmer than the usual secondary label.
+    private static let enabledText = Color(red: 232 / 255, green: 200 / 255, blue: 84 / 255)
+    private static let promptText = Color(white: 110 / 255)
+
     var body: some View {
         let isOn = battery.isLowPowerMode
 
@@ -131,7 +137,7 @@ struct LowBatteryAlertView: View {
                     .monospacedDigit()
                 Text(isOn ? "Low Power Mode enabled" : "Click to turn on Low Power Mode")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(isOn ? Color.batteryLowPower : .islandSecondary)
+                    .foregroundStyle(isOn ? Self.enabledText : Self.promptText)
                     .contentTransition(.opacity)
             }
             .lineLimit(1)
@@ -148,14 +154,27 @@ struct LowBatteryAlertView: View {
     }
 }
 
-/// A battery in a capsule. Off, it's red on dark red with a ring around the
-/// level, inviting a click; on, it's black on Low Power yellow.
+/// The iPhone's Low Power Mode button, measured from its screenshots. Off,
+/// a red battery on dark red with a ring that breathes around the level,
+/// inviting a click; on, a black battery on yellow with the level knocked
+/// out. Sizes are in points, as the iPhone's are.
 private struct LowPowerModeButton: View {
     let battery: BatteryMonitor
 
-    private static let offPill = Color(red: 61 / 255, green: 23 / 255, blue: 20 / 255)
-    private static let offBody = Color.batteryLow.opacity(0.42)
-    private static let offLevel = Color(red: 1, green: 154 / 255, blue: 147 / 255)
+    private static let size = CGSize(width: 86.5, height: 57)
+
+    private static let bodySize = CGSize(width: 44, height: 23.67)
+    private static let bodyRadius: CGFloat = 8.2
+    private static let nubSize = CGSize(width: 2.67, height: 8)
+    private static let nubGap: CGFloat = 2
+    /// From the button's leading edge to the battery's.
+    private static let glyphInset: CGFloat = 20
+
+    private static let onPill = Color.batteryLowPower
+    private static let offPill = Color(red: 50 / 255, green: 13 / 255, blue: 13 / 255)
+    private static let offBody = Color(red: 138 / 255, green: 34 / 255, blue: 42 / 255)
+    private static let offLevel = Color(red: 1, green: 131 / 255, blue: 156 / 255)
+    private static let ring = Color(red: 240 / 255, green: 84 / 255, blue: 98 / 255)
 
     var body: some View {
         let isOn = battery.isLowPowerMode
@@ -164,48 +183,67 @@ private struct LowPowerModeButton: View {
             battery.setLowPowerMode(!isOn)
         } label: {
             glyph(isOn: isOn)
-                .frame(width: 92, height: 56)
-                .background(Capsule().fill(isOn ? Color.batteryLowPower : Self.offPill))
+                .padding(.leading, Self.glyphInset)
+                .frame(width: Self.size.width, height: Self.size.height, alignment: .leading)
+                .background(Capsule().fill(isOn ? Self.onPill : Self.offPill))
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isOn ? "Turn off Low Power Mode" : "Turn on Low Power Mode")
     }
 
+    /// Laid out in the battery body's coordinates, so the level and ring can
+    /// sit exactly where the iPhone puts them.
     private func glyph(isOn: Bool) -> some View {
-        let pill = isOn ? Color.batteryLowPower : Self.offPill
+        let outline = Self.bodySize
         let bodyColor = isOn ? Color.black : Self.offBody
-        let levelWidth = max(9, (38 * Double(battery.level) / 100).rounded())
+        let midY = outline.height / 2
+        // 9pt wide at 20%, the narrowest it gets; on, it's inset 4.17pt.
+        let onWidth = max(9, (outline.width - 8.33) * CGFloat(battery.level) / 100)
+        let level = isOn
+            ? CGRect(x: 4.17, y: 4, width: onWidth, height: 15.67)
+            // Off, it's a little narrower and taller, nearer the edge.
+            : CGRect(x: 3.83, y: 3.58, width: onWidth - 1.33, height: 16.5)
 
-        return HStack(spacing: 2) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: Self.bodyRadius)
                 .fill(bodyColor)
-                .frame(width: 44, height: 24)
-                .overlay(alignment: .leading) {
-                    ZStack {
-                        // The ring sits a gap away from the level and
-                        // spills just past the body's edge.
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .strokeBorder(Color.batteryLow, lineWidth: 2)
-                            .frame(width: levelWidth + 8, height: 26)
-                            .opacity(isOn ? 0 : 1)
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(pill)
-                            .frame(width: levelWidth + 4, height: 22)
-                            .opacity(isOn ? 0 : 1)
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(isOn ? Color.batteryLowPower : Self.offLevel)
-                            .frame(width: levelWidth, height: 18)
-                    }
-                    .frame(width: levelWidth + 8, height: 26)
-                    // Puts the level 3pt in from the body's left edge.
-                    .offset(x: -1)
-                }
-            UnevenRoundedRectangle(bottomTrailingRadius: 2, topTrailingRadius: 2)
+                .frame(width: outline.width, height: outline.height)
+            Capsule()
                 .fill(bodyColor)
-                .frame(width: 3, height: 8)
+                .frame(width: Self.nubSize.width, height: Self.nubSize.height)
+                .position(x: outline.width + Self.nubGap + Self.nubSize.width / 2, y: midY)
+            RoundedRectangle(cornerRadius: level.width * 0.44)
+                .fill(isOn ? Self.onPill : Self.offLevel)
+                .frame(width: level.width, height: level.height)
+                .position(x: level.midX, y: level.midY)
+            if !isOn {
+                BreathingRing(color: Self.ring)
+                    .position(x: level.midX, y: level.midY)
+                    .transition(.opacity)
+            }
         }
+        .frame(width: outline.width + Self.nubGap + Self.nubSize.width, height: outline.height, alignment: .topLeading)
         .accessibilityHidden(true)
+    }
+}
+
+/// The ring around the level that invites a click: a capsule 27 by 32pt,
+/// breathing in and out.
+private struct BreathingRing: View {
+    let color: Color
+
+    var body: some View {
+        Capsule()
+            .strokeBorder(color, lineWidth: 1.67)
+            .frame(width: 27.17, height: 32.17)
+            .phaseAnimator([false, true]) { ring, isOut in
+                ring
+                    .scaleEffect(isOut ? 1 : 0.88)
+                    .opacity(isOut ? 1 : 0.6)
+            } animation: { _ in
+                .easeInOut(duration: 0.9)
+            }
     }
 }
 

@@ -152,10 +152,10 @@ final class NotchViewModel {
     /// Each wing of the charging pill: room for "Charging" on the left and
     /// "100%" with the battery on the right.
     static let chargingWingWidth: CGFloat = 104
-    /// The low battery alert, under the notch row: the text and the 56pt
+    /// The low battery alert, under the notch row: the text and the 57pt
     /// Low Power Mode button with their gaps.
     static let alertTopGap: CGFloat = 8
-    static let alertBodyHeight: CGFloat = alertTopGap + 56 + 14
+    static let alertBodyHeight: CGFloat = alertTopGap + 57 + 14
     static let alertCornerRadius: CGFloat = 38
 
     static func compactWidth(notch: CGSize) -> CGFloat {
