@@ -22,6 +22,11 @@ struct AudioRoute: Equatable {
     var destination: String
     var device: Device
 
+    /// False while all that's known is "some AirPlay device".
+    var isIdentified: Bool {
+        device != .airPlay
+    }
+
     var systemImage: String {
         switch device {
         case .homePodMini: "homepod.mini.fill"
@@ -37,13 +42,17 @@ struct AudioRoute: Equatable {
         }
     }
 
-    /// The model the device announces on the network is definitive. Without
-    /// it, fall back to Music's device kind, then to the name.
-    static func airPlayDevice(named name: String, model: String?, musicKind: UInt32? = nil) -> Device {
-        if let model {
+    /// What the device announces on the network is definitive: an Apple
+    /// model, or for anyone else's device whether it has a screen (a TV).
+    /// Without that, fall back to Music's device kind, then to the name.
+    static func airPlayDevice(named name: String, announced: AirPlayDeviceDirectory.Device?, musicKind: UInt32? = nil) -> Device {
+        if let model = announced?.model {
             if model.hasPrefix("AudioAccessory5") { return .homePodMini }
             if model.hasPrefix("AudioAccessory") { return .homePod }
             if model.hasPrefix("AppleTV") { return .appleTV }
+        }
+        if announced?.hasScreen == true {
+            return .tv
         }
         let lowercased = name.lowercased()
         if musicKind == MusicAirPlayDevice.homePod || lowercased.contains("homepod") {
@@ -112,7 +121,7 @@ final class AudioRouteMonitor {
         if let first = musicDevices.first {
             return AudioRoute(
                 destination: musicDevices.count > 1 ? "\(musicDevices.count) Speakers" : first.name,
-                device: AudioRoute.airPlayDevice(named: first.name, model: directory.model(named: first.name), musicKind: first.kind)
+                device: AudioRoute.airPlayDevice(named: first.name, announced: directory.device(named: first.name), musicKind: first.kind)
             )
         }
         guard let output = systemOutput else { return nil }
@@ -120,21 +129,21 @@ final class AudioRouteMonitor {
         case .airPlay:
             // The Mac's AirPlay output is usually just called "AirPlay". If it
             // does carry a device's name, that settles it.
-            if let model = directory.model(named: output.name) {
-                return AudioRoute(destination: output.name, device: AudioRoute.airPlayDevice(named: output.name, model: model))
+            if let announced = directory.device(named: output.name) {
+                return AudioRoute(destination: output.name, device: AudioRoute.airPlayDevice(named: output.name, announced: announced))
             }
             // Otherwise it's whichever device says it's receiving.
             let receivers = directory.receivingDevices
             if let first = receivers.first {
                 return AudioRoute(
                     destination: receivers.count > 1 ? "\(receivers.count) Speakers" : first.name,
-                    device: AudioRoute.airPlayDevice(named: first.name, model: first.model)
+                    device: AudioRoute.airPlayDevice(named: first.name, announced: first)
                 )
             }
             // A device takes a moment to announce a new session, so until one
             // does, guess the last receiver; it's usually the same speaker.
             if let last = directory.lastReceivingDevice {
-                return AudioRoute(destination: last.name, device: AudioRoute.airPlayDevice(named: last.name, model: last.model))
+                return AudioRoute(destination: last.name, device: AudioRoute.airPlayDevice(named: last.name, announced: last))
             }
             // Never AirPlayed before, or Local Network access was declined.
             return AudioRoute(destination: output.name, device: .airPlay)

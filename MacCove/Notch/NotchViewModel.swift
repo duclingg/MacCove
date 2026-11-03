@@ -85,38 +85,34 @@ final class NotchViewModel {
                 isLifted: false
             )
         case .expanded:
-            return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + Self.expandedBodyHeight), cornerRadius: 28, isLifted: true)
+            return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + Self.expandedBodyHeight), cornerRadius: Self.expandedCornerRadius, isLifted: true)
         }
     }
 
     // MARK: - Layout constants from the design
 
-    static let compactWingWidth: CGFloat = 56
     /// Height of the invisible strip along the top edge that brings a
     /// tucked-away island back on screens without a notch.
     static let hoverStripHeight: CGFloat = 5
     static let compactCornerRadius: CGFloat = 12
-    static let expandedWidth: CGFloat = 452
-    /// Gap from the island's side, and from the notch, to the artwork.
+    static let expandedWidth: CGFloat = 420
+    static let expandedCornerRadius: CGFloat = 32
+    /// Gap from the island's sides to the content.
     static let expandedInset: CGFloat = 20
-    static let expandedHeaderGap: CGFloat = 16
-    static let expandedControlsGap: CGFloat = 10
-    /// Gap under the notch, then the artwork (64), the progress row (18) and
-    /// the controls (44) with their gaps, then 12 at the bottom. The 44pt
-    /// buttons leave empty space under their glyphs, so the visible bottom
-    /// margin roughly matches the 20pt side inset.
-    static let expandedBodyHeight: CGFloat = expandedInset + 64 + expandedHeaderGap + PlaybackProgressView.height
-        + expandedControlsGap + 44 + 12
+    /// Gap from the notch to the artwork. Small, since the notch row above
+    /// is already solid black.
+    static let expandedTopGap: CGFloat = 10
+    static let expandedHeaderGap: CGFloat = 12
+    static let expandedControlsGap: CGFloat = 6
+    static let expandedBottomGap: CGFloat = 10
+    /// Everything under the notch: the artwork (64), the progress row and the
+    /// controls (44) with their gaps. The 44pt buttons leave empty space
+    /// under their glyphs, so the bottom looks roomier than its 10pt.
+    static let expandedBodyHeight: CGFloat = expandedTopGap + 64 + expandedHeaderGap + PlaybackProgressView.height
+        + expandedControlsGap + 44 + expandedBottomGap
 
     static func compactWidth(notch: CGSize) -> CGFloat {
-        notch.width + compactWingWidth * 2
-    }
-
-    /// The same gap above, beside and below the compact artwork. The design's
-    /// 24pt artwork on a 37pt notch leaves 6pt; shorter notches shrink the
-    /// artwork rather than the gap.
-    static func compactInset(notch: CGSize) -> CGFloat {
-        max(5, ((notch.height - 24) / 2).rounded(.down))
+        notch.width + CompactLayout(notch: notch).wingWidth * 2
     }
 
     // MARK: - Interaction
@@ -174,4 +170,25 @@ extension Animation {
     /// Sliding in from and out past the screen edge: as quick, but critically
     /// damped so it lands flush against the edge without overshooting.
     static let islandSlide = Animation.spring(duration: 0.42, bounce: 0)
+}
+
+/// Sizes in the collapsed island, in the iPhone's proportions and scaled to
+/// the notch height. On a 37pt island: 23pt artwork with 7pt above and below
+/// and 9pt to the side, and the same square mirrored on the right.
+struct CompactLayout {
+    let artSize: CGFloat
+    let verticalInset: CGFloat
+    let sideInset: CGFloat
+    /// Each side of the notch: the side inset, the artwork, and a gap
+    /// before the notch.
+    let wingWidth: CGFloat
+
+    init(notch: CGSize) {
+        let height = notch.height
+        artSize = (height * 0.62).rounded()
+        verticalInset = (height - artSize) / 2
+        // A little more at the side, as the iPhone has.
+        sideInset = verticalInset + 2
+        wingWidth = sideInset + artSize + 12
+    }
 }

@@ -1,11 +1,9 @@
 import SwiftUI
 
 /// Artwork in the left wing; in the right, a level meter, the AirPlay
-/// device or headphones audio is playing on, or a pause glyph.
-///
-/// The artwork is inset by the same amount from the top, side and bottom of
-/// the pill, and the right-hand glyph sits in a matching square, so both
-/// wings look balanced whatever the notch height.
+/// device or headphones audio is playing on, or a pause glyph, centred in a
+/// square that mirrors the artwork. Sized and placed like the iPhone's
+/// (see `CompactLayout`).
 struct NowPlayingCompactView: View {
     let nowPlaying: NowPlayingModel
     let notchSize: CGSize
@@ -14,21 +12,23 @@ struct NowPlayingCompactView: View {
     let routeSystemImage: String?
 
     var body: some View {
-        let inset = NotchViewModel.compactInset(notch: notchSize)
-        let artSize = notchSize.height - inset * 2
+        let layout = CompactLayout(notch: notchSize)
+        let artSize = layout.artSize
 
         HStack(spacing: 0) {
             ArtworkView(
                 image: nowPlaying.artwork,
                 size: artSize,
-                cornerRadius: max(NotchViewModel.compactCornerRadius - inset, 4),
+                // Like the iPhone's: rounded by about a sixth of its size.
+                cornerRadius: (artSize * 0.18).rounded(),
                 flipID: nowPlaying.track?.id
             )
             Spacer(minLength: 0)
             trailing(size: artSize)
                 .frame(width: artSize, height: artSize)
         }
-        .padding(inset)
+        .padding(.horizontal, layout.sideInset)
+        .padding(.vertical, layout.verticalInset)
         .frame(width: NotchViewModel.compactWidth(notch: notchSize), height: notchSize.height)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
@@ -39,10 +39,11 @@ struct NowPlayingCompactView: View {
     private func trailing(size: CGFloat) -> some View {
         if !nowPlaying.isPlaying {
             Image(systemName: "pause.fill")
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: (size * 0.6).rounded(), weight: .medium))
                 .foregroundStyle(.islandSecondary)
         } else if let routeSystemImage {
-            AudioRouteIcon(systemName: routeSystemImage, size: size)
+            // About 18pt beside 23pt artwork, as on the iPhone.
+            AudioRouteIcon(systemName: routeSystemImage, pointSize: (size * 0.78).rounded())
         } else {
             AudioBars(isPlaying: true, color: nowPlaying.tint)
         }
@@ -70,9 +71,8 @@ struct NowPlayingExpandedView: View {
             controls
                 .padding(.top, NotchViewModel.expandedControlsGap)
         }
-        // The artwork sits as far below the notch as it is from the side.
         .padding(.horizontal, NotchViewModel.expandedInset)
-        .padding(.top, notchHeight + NotchViewModel.expandedInset)
+        .padding(.top, notchHeight + NotchViewModel.expandedTopGap)
         .frame(width: NotchViewModel.expandedWidth, alignment: .top)
         .task(id: nowPlaying.track?.id) {
             await nowPlaying.refreshFavorite()
@@ -81,7 +81,7 @@ struct NowPlayingExpandedView: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            ArtworkView(image: nowPlaying.artwork, size: 64, cornerRadius: 12, flipID: nowPlaying.track?.id)
+            ArtworkView(image: nowPlaying.artwork, size: 64, cornerRadius: 8, flipID: nowPlaying.track?.id)
             VStack(alignment: .leading, spacing: 0) {
                 if let route {
                     RouteLabel(source: sourceName, destination: route.destination)
@@ -100,8 +100,9 @@ struct NowPlayingExpandedView: View {
         .frame(height: 64)
     }
 
-    /// Transport centred on the island; Apple Music's star, when it applies,
-    /// sits at the leading edge without pushing them off centre.
+    /// Transport centred on the island. Apple Music's star, when it applies,
+    /// sits at the leading edge, and the device audio is playing on at the
+    /// trailing edge, neither pushing the transport off centre.
     private var controls: some View {
         ZStack {
             HStack(spacing: 26) {
@@ -131,6 +132,16 @@ struct NowPlayingExpandedView: View {
                     nowPlaying.toggleFavorite()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // Only while audio is on an external device we can name; an
+            // indicator, not a button.
+            if let route, route.isIdentified {
+                AudioRouteIcon(systemName: route.systemImage, pointSize: 21)
+                    .frame(width: 44, height: 44)
+                    .accessibilityElement()
+                    .accessibilityLabel("Playing on \(route.destination)")
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .frame(height: 44)
@@ -179,24 +190,22 @@ private struct RouteLabel: View {
 }
 
 /// The device audio is playing on (HomePod, AirPods and so on), drawn the
-/// iPhone's way: grey that's lighter at the top, never the artwork tint.
-/// Use it wherever the route icon appears, whether Now Playing is the only
-/// activity or one of several, so it always looks the same.
+/// iPhone's way: the symbol's main layer (a HomePod's top, the AirPods
+/// themselves) in near-white and the rest in dark grey, never the artwork
+/// tint. Use it wherever the route icon appears, whether Now Playing is the
+/// only activity or one of several, so it always looks the same.
 struct AudioRouteIcon: View {
     let systemName: String
-    /// The square it fills; the glyph is drawn at about 86% of it.
-    let size: CGFloat
+    let pointSize: CGFloat
+
+    private static let primary = Color(white: 0.88)
+    private static let secondary = Color(white: 0.3)
 
     var body: some View {
         Image(systemName: systemName)
-            .font(.system(size: size * 0.86))
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [Color(white: 0.86), Color(white: 0.54)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(Self.primary, Self.secondary, Self.secondary)
+            .font(.system(size: pointSize))
             .accessibilityHidden(true)
     }
 }

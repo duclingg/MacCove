@@ -17,6 +17,8 @@ final class AirPlayDeviceDirectory {
     nonisolated struct Device: Equatable {
         var name: String
         var model: String?
+        /// Can show video: a TV, or a box like Apple TV plugged into one.
+        var hasScreen: Bool = false
         var isReceiving: Bool
     }
 
@@ -33,25 +35,34 @@ final class AirPlayDeviceDirectory {
     /// Set in `flags` while a device is playing audio from a sender. Seen
     /// flipping on a HomePod mini as the Mac starts and stops AirPlaying to it.
     nonisolated private static let receiverSessionActiveFlag: UInt64 = 0x2_0000
+    /// Set in `features` by devices that can show video (AirPlay screen
+    /// support): set on Apple TVs and TVs like a Roku TV, not on HomePods.
+    nonisolated private static let screenFeature: UInt64 = 0x80
 
     private enum DefaultsKey {
         static let hasBrowsed = "AirPlayDeviceDirectory.hasBrowsed"
         static let lastReceiverName = "AirPlayDeviceDirectory.lastReceiverName"
         static let lastReceiverModel = "AirPlayDeviceDirectory.lastReceiverModel"
+        static let lastReceiverHasScreen = "AirPlayDeviceDirectory.lastReceiverHasScreen"
     }
 
     init() {
         let defaults = UserDefaults.standard
         if let name = defaults.string(forKey: DefaultsKey.lastReceiverName) {
-            lastReceivingDevice = Device(name: name, model: defaults.string(forKey: DefaultsKey.lastReceiverModel), isReceiving: true)
+            lastReceivingDevice = Device(
+                name: name,
+                model: defaults.string(forKey: DefaultsKey.lastReceiverModel),
+                hasScreen: defaults.bool(forKey: DefaultsKey.lastReceiverHasScreen),
+                isReceiving: true
+            )
         }
         if defaults.bool(forKey: DefaultsKey.hasBrowsed) {
             startIfNeeded()
         }
     }
 
-    func model(named name: String) -> String? {
-        devices[name.lowercased()]?.model
+    func device(named name: String) -> Device? {
+        devices[name.lowercased()]
     }
 
     /// Devices currently playing audio, sorted by name.
@@ -72,6 +83,7 @@ final class AirPlayDeviceDirectory {
                 found[name.lowercased()] = Device(
                     name: name,
                     model: record["model"],
+                    hasScreen: Self.hasScreen(features: record["features"]),
                     isReceiving: Self.isReceiving(flags: record["flags"])
                 )
             }
@@ -89,15 +101,26 @@ final class AirPlayDeviceDirectory {
         lastReceivingDevice = receiver
         UserDefaults.standard.set(receiver.name, forKey: DefaultsKey.lastReceiverName)
         UserDefaults.standard.set(receiver.model, forKey: DefaultsKey.lastReceiverModel)
+        UserDefaults.standard.set(receiver.hasScreen, forKey: DefaultsKey.lastReceiverHasScreen)
     }
 
-    /// `flags` is hex, such as "0xb8c04".
     nonisolated private static func isReceiving(flags: String?) -> Bool {
-        guard var hex = flags?.lowercased() else { return false }
+        hexValue(flags).map { $0 & receiverSessionActiveFlag != 0 } ?? false
+    }
+
+    /// `features` is one or two hex words, "0x7F8AD0,0x38BCF46"; the screen
+    /// bit is in the first.
+    nonisolated private static func hasScreen(features: String?) -> Bool {
+        let firstWord = features?.split(separator: ",").first.map(String.init)
+        return hexValue(firstWord).map { $0 & screenFeature != 0 } ?? false
+    }
+
+    /// Parses hex such as "0xb8c04".
+    nonisolated private static func hexValue(_ text: String?) -> UInt64? {
+        guard var hex = text?.lowercased() else { return nil }
         if hex.hasPrefix("0x") {
             hex.removeFirst(2)
         }
-        guard let value = UInt64(hex, radix: 16) else { return false }
-        return value & receiverSessionActiveFlag != 0
+        return UInt64(hex, radix: 16)
     }
 }
