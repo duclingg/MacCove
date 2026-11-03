@@ -21,7 +21,6 @@ struct NowPlayingCompactView: View {
                 size: artSize,
                 // Like the iPhone's: rounded by about a sixth of its size.
                 cornerRadius: (artSize * 0.18).rounded(),
-                flipID: nowPlaying.track?.id,
                 fallbackIcon: nowPlaying.appIcon
             )
             Spacer(minLength: 0)
@@ -67,7 +66,6 @@ struct NowPlayingMinimalView: View {
                 image: nowPlaying.artwork,
                 size: artSize,
                 cornerRadius: (artSize * 0.18).rounded(),
-                flipID: nowPlaying.track?.id,
                 fallbackIcon: nowPlaying.appIcon
             )
             if let routeSystemImage {
@@ -123,7 +121,6 @@ struct NowPlayingExpandedView: View {
                         image: nowPlaying.artwork,
                         size: 64,
                         cornerRadius: 8,
-                        flipID: nowPlaying.track?.id,
                         fallbackIcon: nowPlaying.appIcon
                     )
                     VStack(alignment: .leading, spacing: 0) {
