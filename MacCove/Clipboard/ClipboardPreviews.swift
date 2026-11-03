@@ -14,7 +14,7 @@ private let history = [
 
 private func compact(_ clipboard: ClipboardMonitor) -> some View {
     IslandPreview(
-        size: CGSize(width: ClipboardCompactView.width(for: clipboard.shown, notch: notch), height: notch.height),
+        size: CGSize(width: NotchViewModel.compactWidth(notch: notch), height: notch.height),
         cornerRadius: NotchViewModel.compactCornerRadius
     ) {
         ClipboardCompactView(clipboard: clipboard, notchSize: notch)

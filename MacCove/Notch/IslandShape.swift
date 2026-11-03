@@ -6,10 +6,15 @@ import SwiftUI
 ///
 /// The ears sit outside the body, so the shape's frame is `earWidth` wider
 /// than the body on each side.
+///
+/// Never drawn shorter than `minHeight`, the notch's: the spring that sizes
+/// the island overshoots as it shrinks, and would otherwise dip above the
+/// bottom of the notch and the menu bar before settling.
 nonisolated struct IslandShape: Shape {
     static let earWidth: CGFloat = 8
 
     var cornerRadius: CGFloat
+    var minHeight: CGFloat = 0
 
     var animatableData: CGFloat {
         get { cornerRadius }
@@ -20,8 +25,9 @@ nonisolated struct IslandShape: Shape {
         let ear = Self.earWidth
         let left = rect.minX + ear
         let right = rect.maxX - ear
-        let bottom = rect.maxY
-        let radius = min(cornerRadius, (right - left) / 2, rect.height / 2)
+        let height = max(rect.height, minHeight)
+        let bottom = rect.minY + height
+        let radius = min(cornerRadius, (right - left) / 2, height / 2)
         // Control point offset for a cubic approximation of a quarter circle.
         let k: CGFloat = 0.5523 * ear
 
@@ -45,5 +51,25 @@ nonisolated struct IslandShape: Shape {
         )
         path.closeSubpath()
         return path
+    }
+}
+
+/// The island's body without its ears, which clips what's drawn in it.
+/// Never shorter than `minHeight` either, so the overshoot doesn't clip the
+/// pill's content.
+nonisolated struct IslandBodyShape: Shape {
+    var cornerRadius: CGFloat
+    var minHeight: CGFloat = 0
+
+    var animatableData: CGFloat {
+        get { cornerRadius }
+        set { cornerRadius = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var bounds = rect
+        bounds.size.height = max(rect.height, minHeight)
+        return UnevenRoundedRectangle(bottomLeadingRadius: cornerRadius, bottomTrailingRadius: cornerRadius)
+            .path(in: bounds)
     }
 }

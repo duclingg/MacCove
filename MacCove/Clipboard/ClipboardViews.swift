@@ -60,22 +60,11 @@ private func copyAge(_ date: Date, at now: Date) -> String {
     return "\(minutes / 60) h"
 }
 
-/// The clipboard in the left wing. In the right: "Copied" in green, or
-/// "Hidden" for a password; a check once you've been through the history.
+/// The clipboard in the left wing and a green check in the right, or a
+/// lock for a password. No wider than any other pill.
 struct ClipboardCompactView: View {
     let clipboard: ClipboardMonitor
     let notchSize: CGSize
-
-    /// Each wing of the pill while there's text on the right: room for
-    /// "Copied" or "Hidden".
-    static let textWingWidth: CGFloat = 77
-
-    static func width(for shown: ClipboardMonitor.Shown?, notch: CGSize) -> CGFloat {
-        guard shown == .history else {
-            return notch.width + textWingWidth * 2
-        }
-        return NotchViewModel.compactWidth(notch: notch)
-    }
 
     var body: some View {
         let layout = CompactLayout(notch: notchSize)
@@ -84,29 +73,22 @@ struct ClipboardCompactView: View {
         HStack(spacing: 0) {
             ClipboardGlyph(size: layout.artSize)
             Spacer(minLength: 0)
-            switch shown {
-            case .copied?:
-                Text("Copied")
-                    .foregroundStyle(.islandSucceeded)
-            case .concealed?:
-                Text("Hidden")
-                    .foregroundStyle(.islandSecondary)
-            case .history?:
-                Image(systemName: "checkmark")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.islandSucceeded)
-                    .frame(width: layout.artSize, height: layout.artSize)
-            case nil:
-                EmptyView()
-            }
+            Image(systemName: isConcealed ? "lock.fill" : "checkmark")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(isConcealed ? Color.islandSecondary : Color.islandSucceeded)
+                .frame(width: layout.artSize, height: layout.artSize)
+                .accessibilityHidden(true)
         }
-        .font(.system(size: 15, weight: .medium))
-        .lineLimit(1)
         .padding(.horizontal, layout.sideInset)
-        .frame(width: Self.width(for: shown, notch: notchSize), height: notchSize.height)
+        .frame(width: NotchViewModel.compactWidth(notch: notchSize), height: notchSize.height)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(shown.map { Self.accessibilityDescription($0) } ?? "Clipboard")
         .accessibilityAddTraits(.isButton)
+    }
+
+    private var isConcealed: Bool {
+        if case .concealed? = clipboard.shown { return true }
+        return false
     }
 
     private static func accessibilityDescription(_ shown: ClipboardMonitor.Shown) -> String {
@@ -130,10 +112,11 @@ struct ClipboardMinimalView: View {
     }
 }
 
-/// Opened up. A copy: what it was and where from, with Clear and Show
-/// History. A password: only that it was copied, and isn't kept. The
-/// history: the last few copies, each copied again with a click, with
-/// Clear History and Pause for 1 Hour.
+/// Opened up, as small as it can be: its buttons sit in the header beside
+/// the title rather than in a row of their own. A copy: what it was and
+/// where from, with History and Clear. A password: only that it was copied,
+/// and isn't kept. The history: the last few copies, each copied again with
+/// a click, with Pause and Clear History.
 struct ClipboardExpandedView: View {
     let clipboard: ClipboardMonitor
     let notchHeight: CGFloat
@@ -143,7 +126,8 @@ struct ClipboardExpandedView: View {
     @State private var hoveredRow: ClipboardMonitor.Item.ID?
 
     private static let headerHeight: CGFloat = 56
-    private static let codeGap: CGFloat = 10
+    private static let controlSize: CGFloat = 36
+    private static let codeGap: CGFloat = 8
     private static let codePadding = EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
     private static let codeLineHeight: CGFloat = 18
     private static let codeLineLimit = 3
@@ -151,11 +135,10 @@ struct ClipboardExpandedView: View {
     private static let codeFontLineHeight = NSLayoutManager().defaultLineHeight(for: codeFont)
     private static let swatchSize: CGFloat = 12
     private static let swatchGap: CGFloat = 8
-    private static let listGap: CGFloat = 10
-    private static let listPadding: CGFloat = 4
-    private static let rowHeight: CGFloat = 40
-    private static let chipsGap: CGFloat = 12
-    private static let chipHeight: CGFloat = 36
+    private static let listGap: CGFloat = 8
+    /// Tighter than the design's 40, so four fit in the panel.
+    private static let rowHeight: CGFloat = 32
+    private static let rowIconSize: CGFloat = 22
     private static let bottomGap: CGFloat = 14
 
     static func bodyHeight(for clipboard: ClipboardMonitor) -> CGFloat {
@@ -163,12 +146,10 @@ struct ClipboardExpandedView: View {
         switch clipboard.shown {
         case let .copied(item)?:
             height += codeGap + codePadding.top + codeLineHeight * CGFloat(lineCount(item)) + codePadding.bottom
-            height += chipsGap + chipHeight
         case .history?:
             if !clipboard.history.isEmpty {
-                height += listGap + listPadding * 2 + rowHeight * CGFloat(clipboard.history.count)
+                height += listGap + rowHeight * CGFloat(clipboard.history.count)
             }
-            height += chipsGap + chipHeight
         case .concealed?, nil:
             break
         }
@@ -179,39 +160,34 @@ struct ClipboardExpandedView: View {
         VStack(spacing: 0) {
             switch clipboard.shown {
             case let .copied(item)?:
-                header(title: "Copied", subtitle: item.sourceName.map { "From \($0)" } ?? "Just now")
+                header(title: "Copied", subtitle: item.sourceName.map { "From \($0)" } ?? "Just now") {
+                    control("Show History", systemImage: "clock.arrow.circlepath") { clipboard.showHistory() }
+                    control("Clear", systemImage: "trash") { clipboard.clear() }
+                }
                 code(item)
                     .padding(.top, Self.codeGap)
-                HStack(spacing: 8) {
-                    chip("Clear") { clipboard.clear() }
-                    chip("Show History") { clipboard.showHistory() }
-                }
-                .padding(.top, Self.chipsGap)
             case let .concealed(sourceName)?:
                 header(
                     title: "Copied a password",
                     subtitle: sourceName.map { "From \($0) · not kept in history" } ?? "Not kept in history"
-                )
+                ) {}
             case .history?:
-                header(title: "Clipboard", subtitle: historySubtitle)
+                header(title: "Clipboard", subtitle: historySubtitle) {
+                    if clipboard.pausedUntil != nil {
+                        control("Resume", systemImage: "play.fill") { clipboard.resume() }
+                    } else {
+                        control("Pause for 1 Hour", systemImage: "pause.fill") { clipboard.pause() }
+                    }
+                    if !clipboard.history.isEmpty {
+                        control("Clear History", systemImage: "trash") { clipboard.clearHistory() }
+                    }
+                }
                 if !clipboard.history.isEmpty {
                     TimelineView(.periodic(from: .now, by: 30)) { context in
                         list(at: context.date)
                     }
                     .padding(.top, Self.listGap)
                 }
-                HStack(spacing: 8) {
-                    chip("Clear History", foreground: clipboard.history.isEmpty ? .islandSecondary : .white) {
-                        clipboard.clearHistory()
-                    }
-                    .disabled(clipboard.history.isEmpty)
-                    if clipboard.pausedUntil != nil {
-                        chip("Resume") { clipboard.resume() }
-                    } else {
-                        chip("Pause for 1 Hour") { clipboard.pause() }
-                    }
-                }
-                .padding(.top, Self.chipsGap)
             case nil:
                 EmptyView()
             }
@@ -228,7 +204,7 @@ struct ClipboardExpandedView: View {
         return clipboard.history.isEmpty ? "Nothing copied in the last 24 hours" : "Click one to copy it again"
     }
 
-    private func header(title: String, subtitle: String) -> some View {
+    private func header<Controls: View>(title: String, subtitle: String, @ViewBuilder controls: () -> Controls) -> some View {
         HStack(spacing: 12) {
             ClipboardGlyph(size: 26)
                 .frame(width: 44, height: 44)
@@ -244,8 +220,25 @@ struct ClipboardExpandedView: View {
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
+
+            HStack(spacing: 8) {
+                controls()
+            }
         }
         .frame(height: Self.headerHeight)
+    }
+
+    private func control(_ label: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: Self.controlSize, height: Self.controlSize)
+                .background(Circle().fill(.white.opacity(0.14)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     /// What was copied, as far as three lines show it. A colour has a
@@ -279,8 +272,8 @@ struct ClipboardExpandedView: View {
                 row(item, at: now)
             }
         }
-        .padding(.vertical, Self.listPadding)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.08)))
+        .background(.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func row(_ item: ClipboardMonitor.Item, at now: Date) -> some View {
@@ -298,9 +291,9 @@ struct ClipboardExpandedView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: Self.symbol(for: item.kind))
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 26, height: 26)
-                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Self.tint(for: item)))
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: Self.rowIconSize, height: Self.rowIconSize)
+                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Self.tint(for: item)))
                     .accessibilityHidden(true)
                 // On one line, however many it had.
                 Text(item.preview.split(whereSeparator: \.isNewline).joined(separator: " "))
@@ -313,7 +306,7 @@ struct ClipboardExpandedView: View {
                     .monospacedDigit()
                     .foregroundStyle(isJustCopied ? Color.islandSucceeded : Color.islandSecondary)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .frame(height: Self.rowHeight)
             .background(hoveredRow == item.id ? Color.white.opacity(0.06) : .clear)
             .contentShape(Rectangle())
@@ -327,24 +320,6 @@ struct ClipboardExpandedView: View {
             }
         }
         .accessibilityLabel("Copy \(item.preview)")
-    }
-
-    private func chip(
-        _ label: String,
-        background: Color = .white.opacity(0.12),
-        foreground: Color = .white,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(foreground)
-                .frame(maxWidth: .infinity)
-                .frame(height: Self.chipHeight)
-                .background(Capsule().fill(background))
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
     }
 
     private static func symbol(for kind: ClipboardMonitor.Kind) -> String {

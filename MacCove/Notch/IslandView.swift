@@ -25,19 +25,14 @@ struct IslandView: View {
                 .offset(y: -Self.topBleed)
                 .accessibilityHidden(true)
 
-            IslandShape(cornerRadius: geometry.cornerRadius)
+            IslandShape(cornerRadius: geometry.cornerRadius, minHeight: viewModel.notchSize.height)
                 .fill(.black)
                 .frame(width: geometry.size.width + IslandShape.earWidth * 2, height: geometry.size.height)
                 .shadow(color: .black.opacity(geometry.isLifted ? 0.42 : 0), radius: 24, y: 18)
 
             content
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        bottomLeadingRadius: geometry.cornerRadius,
-                        bottomTrailingRadius: geometry.cornerRadius
-                    )
-                )
+                .clipShape(IslandBodyShape(cornerRadius: geometry.cornerRadius, minHeight: viewModel.notchSize.height))
                 .contentShape(Rectangle())
                 .onTapGesture {
                     if viewModel.state == .compact {
@@ -156,7 +151,7 @@ private struct IslandBubbleView: View {
                 .offset(y: -IslandView.topBleed)
                 .accessibilityHidden(true)
 
-            IslandShape(cornerRadius: NotchViewModel.compactCornerRadius)
+            IslandShape(cornerRadius: NotchViewModel.compactCornerRadius, minHeight: viewModel.notchSize.height)
                 .fill(.black)
                 .frame(width: size.width + IslandShape.earWidth * 2, height: size.height)
 

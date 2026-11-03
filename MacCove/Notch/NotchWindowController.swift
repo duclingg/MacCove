@@ -6,9 +6,8 @@ import SwiftUI
 /// whether the panel should receive the mouse based on where the cursor is
 /// relative to the island. Lives for the lifetime of the app.
 final class NotchWindowController {
-    /// Room for the largest island state plus its shadow: the clipboard
-    /// history, at about 345pt.
-    private static let canvasSize = CGSize(width: 640, height: 420)
+    /// Room for the largest island state plus its shadow.
+    private static let canvasSize = CGSize(width: 640, height: 300)
 
     private let panel = NotchPanel()
     /// A copy of the island above the lock screen, there only while locked.
@@ -226,17 +225,21 @@ final class NotchWindowController {
             }
         }
 
-        guard viewModel.state != .idle else {
-            setReceivesMouse(false)
-            viewModel.setHovering(nil)
-            return
-        }
-
         // Also reaches 1pt past the edge. Without it, a cursor parked in the
         // topmost row would count as over the strip but not the island, so
         // the island would keep tucking away and coming back.
         let island = viewModel.geometry.size
         let islandFrame = NSRect(x: screen.frame.midX - island.width / 2, y: top - island.height, width: island.width, height: island.height + 1)
+
+        // An idle notch only grows under the cursor. Clicks there still go
+        // through, to the menu bar.
+        guard viewModel.state != .idle else {
+            setReceivesMouse(false)
+            viewModel.setHovering(nil)
+            viewModel.setIdleNotchHovered(viewModel.hasPhysicalNotch && islandFrame.contains(mouse))
+            return
+        }
+        viewModel.setIdleNotchHovered(false)
         var hovered = islandFrame.contains(mouse) ? viewModel.primaryActivity : nil
         if hovered == nil {
             hovered = viewModel.bubbles.flatMap(\.segments).first { segment in

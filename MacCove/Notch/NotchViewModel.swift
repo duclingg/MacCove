@@ -95,6 +95,9 @@ final class NotchViewModel {
 
     /// The island or bubble under the cursor.
     private(set) var hovered: IslandActivity?
+    /// The cursor is on the notch with nothing running. It grows a little,
+    /// as the pill does, but never takes the click.
+    private(set) var isIdleNotchHovered = false
     private var presentation: IslandState = .compact
     /// What was clicked open, which leads while the island is expanded.
     private var expandedActivity: IslandActivity?
@@ -189,14 +192,11 @@ final class NotchViewModel {
         // A build goes ahead of music, as on the iPhone, where a live
         // activity you're waiting on leads. An agent waiting for your
         // answer goes ahead of everything, even over a full-screen app,
-        // since it can't go on without you. A copy leads for its moment,
-        // like an alert, but leaves the rest beside it.
+        // since it can't go on without you. A copy comes last: it shows only
+        // where there's room, and never pushes anything aside.
         var running: [IslandActivity] = []
         if claude.needsAnswer {
             running.append(.claudeCode)
-        }
-        if isShowingAll, clipboard.shown != nil {
-            running.append(.clipboard)
         }
         if isShowingAll, xcode.build != nil {
             running.append(.xcode)
@@ -209,6 +209,9 @@ final class NotchViewModel {
         }
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
+        }
+        if isShowingAll, clipboard.shown != nil {
+            running.append(.clipboard)
         }
         if presentation == .expanded, let expandedActivity, let index = running.firstIndex(of: expandedActivity) {
             running.insert(running.remove(at: index), at: 0)
@@ -258,7 +261,12 @@ final class NotchViewModel {
         let grow: CGSize = hovered != nil && hovered == primary ? Self.hoverGrowth : .zero
         switch state {
         case .idle where hasPhysicalNotch:
-            return IslandGeometry(size: notch, cornerRadius: 10, isLifted: false)
+            let idleGrow = isIdleNotchHovered ? Self.hoverGrowth : .zero
+            return IslandGeometry(
+                size: CGSize(width: notch.width + idleGrow.width, height: notch.height + idleGrow.height),
+                cornerRadius: Self.notchCornerRadius,
+                isLifted: false
+            )
         case .idle:
             // Keeps its compact shape so it slides out of sight whole,
             // rather than shrinking as it goes.
@@ -285,7 +293,6 @@ final class NotchViewModel {
             case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
             case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
             case .claudeCode?: Self.compactWidth(notch: notch)
-            case .clipboard?: ClipboardCompactView.width(for: clipboard.shown, notch: notch)
             default: Self.compactWidth(notch: notch)
             }
             return IslandGeometry(
@@ -379,7 +386,12 @@ final class NotchViewModel {
     /// Height of the invisible strip along the top edge that brings a
     /// tucked-away island back on screens without a notch.
     static let hoverStripHeight: CGFloat = 5
-    static let compactCornerRadius: CGFloat = 12
+    /// The hardware notch's bottom corners, by eye: macOS doesn't say. Every
+    /// shape uses it, so the pill, the bubbles and the open island all
+    /// round off like the notch they grow out of.
+    static let notchCornerRadius: CGFloat = 10
+    /// The pill and the bubbles beside it.
+    static let compactCornerRadius = notchCornerRadius
     /// How much the pill grows under the cursor.
     static let hoverGrowth = CGSize(width: 8, height: 3)
     /// Between the pill and a bubble, as in the design. Each has an 8pt
@@ -413,7 +425,7 @@ final class NotchViewModel {
         return layout.sideInset * 2 + layout.artSize * 2 + bubbleRouteGap
     }
     static let expandedWidth: CGFloat = 420
-    static let expandedCornerRadius: CGFloat = 32
+    static let expandedCornerRadius = notchCornerRadius
     /// Gap from the island's sides to the content.
     static let expandedInset: CGFloat = 20
     /// Gap from the notch to the artwork. Small, since the notch row above
@@ -435,7 +447,7 @@ final class NotchViewModel {
     /// Low Power Mode button with their gaps.
     static let alertTopGap: CGFloat = 8
     static let alertBodyHeight: CGFloat = alertTopGap + 57 + 14
-    static let alertCornerRadius: CGFloat = 38
+    static let alertCornerRadius = notchCornerRadius
 
     static func compactWidth(notch: CGSize) -> CGFloat {
         notch.width + CompactLayout(notch: notch).wingWidth * 2
@@ -483,6 +495,11 @@ final class NotchViewModel {
             terminal.leaveIfDue(after: .seconds(1.2))
             clipboard.leaveIfDue(after: .seconds(1.2))
         }
+    }
+
+    func setIdleNotchHovered(_ isHovered: Bool) {
+        guard isHovered != isIdleNotchHovered else { return }
+        isIdleNotchHovered = isHovered
     }
 
     /// Entering full screen closes the player too, so it doesn't come back
