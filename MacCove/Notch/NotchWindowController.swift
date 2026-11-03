@@ -149,7 +149,7 @@ final class NotchWindowController {
 
         guard viewModel.state != .idle else {
             setReceivesMouse(false)
-            viewModel.setHovering(false)
+            viewModel.setHovering(nil)
             return
         }
 
@@ -158,10 +158,17 @@ final class NotchWindowController {
         // the island would keep tucking away and coming back.
         let island = viewModel.geometry.size
         let islandFrame = NSRect(x: screen.frame.midX - island.width / 2, y: top - island.height, width: island.width, height: island.height + 1)
-        let isOverIsland = islandFrame.contains(mouse)
+        var hovered = islandFrame.contains(mouse) ? viewModel.primaryActivity : nil
+        if hovered == nil {
+            hovered = viewModel.bubbles.first { bubble in
+                let frame = bubble.frame
+                return NSRect(x: screen.frame.midX + frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height + 1)
+                    .contains(mouse)
+            }?.activity
+        }
 
-        setReceivesMouse(isOverIsland)
-        viewModel.setHovering(isOverIsland)
+        setReceivesMouse(hovered != nil)
+        viewModel.setHovering(hovered)
     }
 
     /// This runs on every mouse move anywhere on screen, so only talk to the
