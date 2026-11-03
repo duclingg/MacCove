@@ -9,5 +9,18 @@
 		<!-- Read each AirPlay device's model so the island shows the right icon. -->
 		<string>_airplay._tcp</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<!-- maccove://xcode/started and so on, opened by the scripts Xcode's
+			     Behaviors run as a build starts, succeeds or fails. -->
+			<key>CFBundleURLName</key>
+			<string>com.ducling.MacCove</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>maccove</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

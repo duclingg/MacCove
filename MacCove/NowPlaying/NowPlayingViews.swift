@@ -51,22 +51,31 @@ struct NowPlayingCompactView: View {
     }
 }
 
-/// Now Playing in a bubble beside another activity: just the artwork, as
-/// the pill draws it.
+/// Now Playing in a bubble beside another activity: the artwork, as the
+/// pill draws it, and to its right the AirPlay device or headphones it's
+/// playing on when the bubble has room.
 struct NowPlayingMinimalView: View {
     let nowPlaying: NowPlayingModel
     let notchSize: CGSize
+    var routeSystemImage: String?
 
     var body: some View {
         let artSize = CompactLayout(notch: notchSize).artSize
 
-        ArtworkView(
-            image: nowPlaying.artwork,
-            size: artSize,
-            cornerRadius: (artSize * 0.18).rounded(),
-            flipID: nowPlaying.track?.id,
-            fallbackIcon: nowPlaying.appIcon
-        )
+        HStack(spacing: NotchViewModel.bubbleRouteGap) {
+            ArtworkView(
+                image: nowPlaying.artwork,
+                size: artSize,
+                cornerRadius: (artSize * 0.18).rounded(),
+                flipID: nowPlaying.track?.id,
+                fallbackIcon: nowPlaying.appIcon
+            )
+            if let routeSystemImage {
+                // Sized as in the pill's right wing.
+                AudioRouteIcon(systemName: routeSystemImage, pointSize: (artSize * 0.78).rounded())
+                    .frame(width: artSize, height: artSize)
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(nowPlayingDescription(nowPlaying))
         .accessibilityAddTraits(.isButton)

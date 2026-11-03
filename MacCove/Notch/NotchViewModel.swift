@@ -19,6 +19,8 @@ enum IslandActivity: Hashable {
     case lowBattery
     /// "Charging" beside the notch while the battery fills up.
     case charging
+    /// An Xcode build: building, then failed or succeeded.
+    case xcode
     case nowPlaying
 
     /// How long a battery alert stays; the others leave by themselves.
@@ -26,7 +28,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .nowPlaying: .zero
+        case .signIn, .xcode, .nowPlaying: .zero
         }
     }
 }
@@ -37,6 +39,9 @@ struct IslandBubble: Equatable, Identifiable {
     /// From the top of the screen, with x measured from the island's
     /// centre line.
     let frame: CGRect
+    /// A lone bubble has room for a second glyph beside the first: the
+    /// speaker or headphones Now Playing is on, as the iPhone shows it.
+    var isWide = false
 
     var id: IslandActivity { activity }
 }
@@ -54,6 +59,7 @@ final class NotchViewModel {
     let audioRoute: AudioRouteMonitor
     let battery: BatteryMonitor
     let signIn: SignInMonitor
+    let xcode: XcodeBuildMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
@@ -79,12 +85,21 @@ final class NotchViewModel {
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
     @ObservationIgnored private var alertTask: Task<Void, Never>?
+    /// Closes a failed build that opened by itself.
+    @ObservationIgnored private var xcodeTask: Task<Void, Never>?
 
-    init(nowPlaying: NowPlayingModel, audioRoute: AudioRouteMonitor, battery: BatteryMonitor, signIn: SignInMonitor) {
+    init(
+        nowPlaying: NowPlayingModel,
+        audioRoute: AudioRouteMonitor,
+        battery: BatteryMonitor,
+        signIn: SignInMonitor,
+        xcode: XcodeBuildMonitor
+    ) {
         self.nowPlaying = nowPlaying
         self.audioRoute = audioRoute
         self.battery = battery
         self.signIn = signIn
+        self.xcode = xcode
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
             self?.playbackChanged(playing: playing)
@@ -94,6 +109,9 @@ final class NotchViewModel {
         }
         signIn.onChange = { [weak self] prompt in
             self?.signInChanged(prompt)
+        }
+        xcode.onEvent = { [weak self] event in
+            self?.xcodeEvent(event)
         }
     }
 
@@ -113,7 +131,12 @@ final class NotchViewModel {
         if let batteryAlert {
             return isShowingAll ? [batteryAlert] : []
         }
+        // A build goes ahead of music, as on the iPhone, where a live
+        // activity you're waiting on leads.
         var running: [IslandActivity] = []
+        if isShowingAll, xcode.build != nil {
+            running.append(.xcode)
+        }
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
         }
@@ -187,14 +210,22 @@ final class NotchViewModel {
                 isLifted: true
             )
         case .compact:
-            let width = primary == .charging ? Self.chargingWidth(notch: notch) : Self.compactWidth(notch: notch)
+            let width = switch primary {
+            case .charging?: Self.chargingWidth(notch: notch)
+            case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
+            default: Self.compactWidth(notch: notch)
+            }
             return IslandGeometry(
                 size: CGSize(width: width + grow.width, height: notch.height + grow.height),
                 cornerRadius: Self.compactCornerRadius,
                 isLifted: false
             )
         case .expanded:
-            let body = primary == .nowPlaying ? Self.expandedBodyHeight : BatteryExpandedView.bodyHeight
+            let body = switch primary {
+            case .nowPlaying?: Self.expandedBodyHeight
+            case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
+            default: BatteryExpandedView.bodyHeight
+            }
             return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
         }
     }
@@ -204,14 +235,20 @@ final class NotchViewModel {
     var bubbles: [IslandBubble] {
         guard state == .compact else { return [] }
         let islandWidth = geometry.size.width
-        return activities.dropFirst().enumerated().map { index, activity in
+        let others = activities.dropFirst()
+        return others.enumerated().map { index, activity in
             let grow: CGFloat = hovered == activity ? Self.bubbleHoverGrowth : 0
-            let size = CGSize(width: notchSize.height + grow, height: notchSize.height + grow)
+            // With three running, both bubbles stay square to take up as
+            // little of the menu bar as they can.
+            let isWide = others.count == 1 && activity == .nowPlaying && audioRoute.route != nil
+            let width = isWide ? Self.wideBubbleWidth(notch: notchSize) : notchSize.height
+            let size = CGSize(width: width + grow, height: notchSize.height + grow)
             let distance = islandWidth / 2 + Self.bubbleGap + size.width / 2
             let midX = index == 0 ? distance : -distance
             return IslandBubble(
                 activity: activity,
-                frame: CGRect(x: midX - size.width / 2, y: 0, width: size.width, height: size.height)
+                frame: CGRect(x: midX - size.width / 2, y: 0, width: size.width, height: size.height),
+                isWide: isWide
             )
         }
     }
@@ -224,10 +261,20 @@ final class NotchViewModel {
     static let compactCornerRadius: CGFloat = 12
     /// How much the pill grows under the cursor.
     static let hoverGrowth = CGSize(width: 8, height: 3)
-    /// Between the pill and a bubble, enough for the two to read as
-    /// separate shapes.
-    static let bubbleGap: CGFloat = 8
+    /// Between the pill and a bubble, as in the design. Each has an 8pt
+    /// ear flaring out at the top, so this leaves a clear 2pt even there
+    /// and the two read as separate shapes.
+    static let bubbleGap: CGFloat = 18
     static let bubbleHoverGrowth: CGFloat = 3
+    /// Between the artwork and the audio device in a wide bubble.
+    static let bubbleRouteGap: CGFloat = 6
+
+    /// The artwork and the device, each in the pill's square, with the
+    /// same inset all round as above and below them.
+    static func wideBubbleWidth(notch: CGSize) -> CGFloat {
+        let layout = CompactLayout(notch: notch)
+        return layout.verticalInset * 2 + layout.artSize * 2 + bubbleRouteGap
+    }
     static let expandedWidth: CGFloat = 420
     static let expandedCornerRadius: CGFloat = 32
     /// Gap from the island's sides to the content.
@@ -291,6 +338,9 @@ final class NotchViewModel {
         // An alert stays while the cursor is on it, then leaves shortly after.
         if isHovering {
             alertTask?.cancel()
+            // A failed build that opened by itself stays open while the
+            // cursor is on it, then closes like anything else.
+            xcodeTask?.cancel()
         } else if presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
         }
@@ -373,6 +423,51 @@ final class NotchViewModel {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self, !self.isHovering, self.presentation != .expanded else { return }
             self.batteryAlert = nil
+        }
+    }
+
+    /// A failed build opens by itself with its first errors, unless another
+    /// activity is open or the island is keeping out of the way. Either
+    /// result stays, as the pill once closed, until it's dismissed or the
+    /// next build starts.
+    private func xcodeEvent(_ event: XcodeBuildMonitor.Event) {
+        xcodeTask?.cancel()
+        switch event {
+        case .started:
+            // A failed build left open gives way to the next one.
+            if presentation == .expanded, expandedActivity == .xcode, !isHovering {
+                presentation = .compact
+            }
+        case .failed:
+            let isShowingAll = !isFullScreenActive || isRevealedByHover
+            let isOtherOpen = presentation == .expanded && expandedActivity != .xcode
+            guard !isSigningIn, batteryAlert == nil, isShowingAll, !isOtherOpen else { return }
+            collapseTask?.cancel()
+            expandedActivity = .xcode
+            presentation = .expanded
+            scheduleXcodeCollapse()
+        case .succeeded:
+            break
+        case .ended:
+            // Dismissed from its own buttons: nothing is left to keep open.
+            if expandedActivity == .xcode {
+                collapseTask?.cancel()
+                presentation = .compact
+                expandedActivity = nil
+            }
+        }
+    }
+
+    /// How long a failed build stays open by itself before shrinking to its
+    /// error count.
+    private static let xcodeFailedOpenDuration: Duration = .seconds(8)
+
+    private func scheduleXcodeCollapse() {
+        xcodeTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.xcodeFailedOpenDuration)
+            guard !Task.isCancelled, let self, !self.isHovering,
+                  self.presentation == .expanded, self.expandedActivity == .xcode else { return }
+            self.presentation = .compact
         }
     }
 

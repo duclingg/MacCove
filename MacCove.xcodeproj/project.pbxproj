@@ -342,7 +342,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MacCove;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MacCove shows and changes whether the song playing in Music is a Favorite.";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MacCove shows and changes whether the song playing in Music is a Favorite, and shows and stops your Xcode builds.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "MacCove finds the AirPlay speakers and TVs on your network to show which one is playing.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -380,7 +380,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MacCove;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MacCove shows and changes whether the song playing in Music is a Favorite.";
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MacCove shows and changes whether the song playing in Music is a Favorite, and shows and stops your Xcode builds.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "MacCove finds the AirPlay speakers and TVs on your network to show which one is playing.";
 				LD_RUNPATH_SEARCH_PATHS = (
