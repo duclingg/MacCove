@@ -73,6 +73,9 @@ struct IslandView: View {
                 case .lowBattery?:
                     LowBatteryAlertView(battery: viewModel.battery, notchHeight: notch.height)
                         .transition(.islandContent)
+                case .signIn?:
+                    SignInCompactView(signIn: viewModel.signIn, notchSize: notch)
+                        .transition(.islandContent)
                 case nil:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
@@ -82,6 +85,7 @@ struct IslandView: View {
                     .transition(.islandContent)
                 }
             case .expanded:
+                // Sign-in never opens, so any alert here is the battery's.
                 if viewModel.alert != nil {
                     BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
                         .transition(.islandContent)

@@ -12,6 +12,13 @@ struct MacCoveApp: App {
                 set: { launchAtLogin.setEnabled($0) }
             ))
             .onAppear { launchAtLogin.refresh() }
+            // Without it the island still shows Touch ID prompts, but can't
+            // tell an unlock from a cancel, so it never shows the unlock.
+            if !appDelegate.signIn.hasAccessibilityAccess {
+                Button("Show Touch ID Unlocks…") {
+                    appDelegate.signIn.requestAccessibilityAccess()
+                }
+            }
             Divider()
             Button("Quit MacCove") {
                 NSApp.terminate(nil)
@@ -22,6 +29,8 @@ struct MacCoveApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Made up front, so the menu can offer Accessibility access.
+    let signIn = SignInMonitor()
     private var notchController: NotchWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -32,9 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let battery = BatteryMonitor()
         notchController = NotchWindowController(
-            viewModel: NotchViewModel(nowPlaying: nowPlaying, audioRoute: audioRoute, battery: battery)
+            viewModel: NotchViewModel(nowPlaying: nowPlaying, audioRoute: audioRoute, battery: battery, signIn: signIn)
         )
         nowPlaying.start()
         battery.start()
+        signIn.start()
     }
 }
