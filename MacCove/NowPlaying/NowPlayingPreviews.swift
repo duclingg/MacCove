@@ -65,7 +65,7 @@ private func track(
     app: String = "com.spotify.client",
     isExplicit: Bool = false,
     isPlaying: Bool = true,
-    elapsed: TimeInterval = 84,
+    elapsed: TimeInterval? = 84,
     duration: TimeInterval = 228,
     isFavorite: Bool? = nil
 ) -> NowPlayingModel {
@@ -168,6 +168,14 @@ private func expanded(_ nowPlaying: NowPlayingModel, route: AudioRoute? = nil) -
 
 #Preview("Expanded · Live Radio") {
     expanded(track(.slowOrbit, title: "Morning Mix", artist: "KXPN Live", albumName: "", duration: 0))
+}
+
+#Preview("Expanded · Apple TV, App Icon for Artwork") {
+    expanded(track(nil, title: "Severance", artist: "S2, E3: Who Is Alive?", albumName: "", app: "com.apple.TV", elapsed: 1290, duration: 2940))
+}
+
+#Preview("Expanded · Netflix in Safari, No Position") {
+    expanded(track(nil, title: "Netflix", artist: "", albumName: "", app: "com.apple.Safari", elapsed: nil, duration: 0))
 }
 
 #Preview("Expanded · Long Title, No Artwork") {

@@ -29,10 +29,16 @@ final class NowPlayingModel {
 
     private(set) var track: Track?
     private(set) var artwork: NSImage?
+    /// The playing app's icon, shown in place of artwork when there's none,
+    /// as on the iPhone.
+    private(set) var appIcon: NSImage?
     /// Accent derived from the artwork, lifted so it reads on black.
     private(set) var tint: Color = .white
     private(set) var isPlaying = false
     private(set) var duration: TimeInterval = 0
+    /// Whether the app reports a playhead at all. Some web players,
+    /// Netflix's among them, report neither a length nor a position.
+    private(set) var reportsPosition = false
     /// `nil` until the playing app has been asked.
     private(set) var isFavorite: Bool?
 
@@ -84,9 +90,15 @@ final class NowPlayingModel {
         return Self.spokenAudioApps.contains(bundleIdentifier)
     }
 
-    /// Radio and live video report no length.
+    /// Radio and live video report a position but no length.
     var isLive: Bool {
-        hasMedia && duration <= 0
+        hasMedia && duration <= 0 && reportsPosition
+    }
+
+    /// Anything to show on the progress bar: a length, or at least a
+    /// position.
+    var hasTimeline: Bool {
+        duration > 0 || reportsPosition
     }
 
     /// "Artist • Album", leaving out whichever the app doesn't report.
@@ -238,6 +250,7 @@ final class NowPlayingModel {
     private func apply(_ info: TrackInfo?) {
         guard let payload = info?.payload, let title = payload.title, !title.isEmpty else {
             track = nil
+            appIcon = nil
             clearArtwork()
             setPlaying(false)
             isFavorite = nil
@@ -249,14 +262,18 @@ final class NowPlayingModel {
             title: title,
             artist: payload.artist ?? "",
             album: payload.album ?? "",
-            bundleIdentifier: payload.bundleIdentifier,
+            bundleIdentifier: payload.bundleIdentifier.map(Self.owningApp),
             isExplicit: payload.isExplicit ?? false
         )
         let isNewTrack = track?.id != next.id
+        if next.bundleIdentifier != track?.bundleIdentifier {
+            appIcon = next.bundleIdentifier.flatMap(Self.icon(forApp:))
+        }
 
         track = next
         setPlaying(payload.isPlaying ?? false)
         duration = (payload.durationMicros ?? 0) / 1_000_000
+        reportsPosition = payload.elapsedTimeMicros != nil
         if let rate = payload.playbackRate, rate > 0 {
             playbackRate = rate
         } else {
@@ -300,6 +317,23 @@ final class NowPlayingModel {
         }
     }
 
+    /// Media helpers report sessions on their app's behalf. Safari's media
+    /// plays in WebKit's GPU process, which can't be opened and has no icon
+    /// of its own.
+    private static let helperOwners = [
+        "com.apple.WebKit.GPU": "com.apple.Safari",
+        "com.apple.WebKit.WebContent": "com.apple.Safari",
+    ]
+
+    private static func owningApp(_ bundleIdentifier: String) -> String {
+        helperOwners[bundleIdentifier] ?? bundleIdentifier
+    }
+
+    private static func icon(forApp bundleIdentifier: String) -> NSImage? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+            .map { NSWorkspace.shared.icon(forFile: $0.path(percentEncoded: false)) }
+    }
+
     private func clearArtwork() {
         artworkTask?.cancel()
         artworkKey = nil
@@ -319,7 +353,8 @@ extension NowPlayingModel {
         app bundleIdentifier: String = "com.spotify.client",
         isExplicit: Bool = false,
         isPlaying: Bool = true,
-        elapsed: TimeInterval = 84,
+        /// `nil` for an app that reports no playhead.
+        elapsed: TimeInterval? = 84,
         duration: TimeInterval = 228,
         isFavorite: Bool? = nil,
         artwork: NSImage? = nil,
@@ -337,10 +372,12 @@ extension NowPlayingModel {
         )
         model.isPlaying = isPlaying
         model.duration = duration
-        model.elapsedAnchor = elapsed
+        model.reportsPosition = elapsed != nil
+        model.elapsedAnchor = elapsed ?? 0
         model.anchorDate = Date()
         model.isFavorite = isFavorite
         model.artwork = artwork
+        model.appIcon = icon(forApp: bundleIdentifier)
         model.tint = tint
         return model
     }
