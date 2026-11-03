@@ -146,6 +146,10 @@ final class NotchViewModel {
         terminal.onEvent = { [weak self] event in
             self?.terminalEvent(event)
         }
+        terminal.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.isHovering || self.presentation == .expanded
+        }
         claude.onEvent = { [weak self] event in
             self?.claudeEvent(event)
         }
@@ -455,6 +459,7 @@ final class NotchViewModel {
             failureCollapseTask?.cancel()
         } else if presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
+            terminal.leaveIfDue(after: .seconds(1.2))
         }
     }
 
@@ -662,6 +667,7 @@ final class NotchViewModel {
             self.presentation = .compact
             self.isRevealedByHover = false
             self.scheduleAlertDismissal(after: .seconds(1.2))
+            self.terminal.leaveIfDue(after: .seconds(1.2))
         }
     }
 }

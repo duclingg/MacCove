@@ -161,7 +161,7 @@ struct XcodeCompactView: View {
 }
 
 /// Xcode in a bubble beside another activity: its icon, inside the ring
-/// while building or testing.
+/// while building or testing, and inside a red one after a failure.
 struct XcodeMinimalView: View {
     let xcode: XcodeBuildMonitor
     let notchSize: CGSize
@@ -181,6 +181,14 @@ struct XcodeMinimalView: View {
                         )
                         XcodeIcon(size: (layout.ringDiameter * 0.55).rounded())
                     }
+                }
+            } else if case .failed? = xcode.build?.phase {
+                ZStack {
+                    Circle()
+                        .stroke(Color.islandError, lineWidth: layout.ringLineWidth)
+                        .padding(layout.ringLineWidth / 2)
+                        .frame(width: layout.ringDiameter, height: layout.ringDiameter)
+                    XcodeIcon(size: (layout.ringDiameter * 0.55).rounded())
                 }
             } else {
                 XcodeIcon(size: layout.artSize)
@@ -266,12 +274,26 @@ struct XcodeExpandedView: View {
         .frame(width: NotchViewModel.expandedWidth, alignment: .top)
     }
 
+    /// A failure has its title in red and a red badge on the icon.
     private func header(_ build: XcodeBuildMonitor.Build, at date: Date) -> some View {
-        HStack(spacing: 12) {
+        let isFailed = if case .failed = build.phase { true } else { false }
+        return HStack(spacing: 12) {
             XcodeIcon(size: 44)
+                .overlay(alignment: .bottomTrailing) {
+                    if isFailed {
+                        Image(systemName: "exclamationmark")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(.white)
+                            .frame(width: 18, height: 18)
+                            .background(Circle().fill(Color.islandError))
+                            .background(Circle().fill(.black).padding(-2))
+                            .offset(x: 4, y: 4)
+                    }
+                }
             VStack(alignment: .leading, spacing: 0) {
                 Text(Self.title(build))
                     .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isFailed ? Color.islandError : .white)
                 Text(Self.subtitle(build, at: date))
                     .font(.system(size: 13))
                     .foregroundStyle(.islandSecondary)
