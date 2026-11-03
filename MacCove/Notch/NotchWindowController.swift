@@ -25,6 +25,7 @@ final class NotchWindowController {
 
         reposition()
         panel.orderFrontRegardless()
+        LockScreenSpace.move(panel)
 
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,

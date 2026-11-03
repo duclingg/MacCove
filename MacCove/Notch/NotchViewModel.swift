@@ -9,18 +9,23 @@ enum IslandState {
     case expanded
 }
 
-/// A battery event that takes the island over for a few seconds, ahead of
-/// Now Playing, as on the iPhone.
-enum BatteryAlert: Equatable {
+/// A system event that takes the island over, ahead of Now Playing, as on
+/// the iPhone.
+enum IslandAlert: Equatable {
     /// "Charging" beside the notch while the battery fills up.
     case charging
     /// The level and a button for Low Power Mode, or its confirmation.
     case lowBattery
+    /// A Touch ID or password prompt. Stays for as long as the prompt does,
+    /// and ahead of the battery alerts.
+    case signIn
 
+    /// How long a battery alert stays; a sign-in leaves with its prompt.
     var duration: Duration {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
+        case .signIn: .zero
         }
     }
 }
@@ -37,6 +42,7 @@ final class NotchViewModel {
     let nowPlaying: NowPlayingModel
     let audioRoute: AudioRouteMonitor
     let battery: BatteryMonitor
+    let signIn: SignInMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
@@ -53,16 +59,17 @@ final class NotchViewModel {
     /// aside, as on the iPhone.
     private var isFullScreenActive = false
     /// Shown in place of Now Playing until it times out.
-    private(set) var alert: BatteryAlert?
+    private(set) var alert: IslandAlert?
 
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
     @ObservationIgnored private var alertTask: Task<Void, Never>?
 
-    init(nowPlaying: NowPlayingModel, audioRoute: AudioRouteMonitor, battery: BatteryMonitor) {
+    init(nowPlaying: NowPlayingModel, audioRoute: AudioRouteMonitor, battery: BatteryMonitor, signIn: SignInMonitor) {
         self.nowPlaying = nowPlaying
         self.audioRoute = audioRoute
         self.battery = battery
+        self.signIn = signIn
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
             self?.playbackChanged(playing: playing)
@@ -70,13 +77,18 @@ final class NotchViewModel {
         battery.onEvent = { [weak self] event in
             self?.batteryEvent(event)
         }
+        signIn.onChange = { [weak self] prompt in
+            self?.signInChanged(prompt)
+        }
     }
 
     var state: IslandState {
         guard nowPlaying.hasMedia || alert != nil else { return .idle }
         // Brought back on purpose: shown whatever else is going on.
         if isRevealedByHover { return presentation }
-        if isFullScreenActive { return .idle }
+        // A prompt answers something you just did, so it shows in full
+        // screen too.
+        if isFullScreenActive, alert != .signIn { return .idle }
         if alert == nil, presentation == .compact, isDismissedForPause { return .idle }
         return presentation
     }
@@ -106,6 +118,19 @@ final class NotchViewModel {
                 size: CGSize(width: Self.compactWidth(notch: notch), height: notch.height),
                 cornerRadius: Self.compactCornerRadius,
                 isLifted: false
+            )
+        case .compact where alert == .signIn:
+            let grow: CGSize = isHovering ? CGSize(width: 8, height: 3) : .zero
+            return IslandGeometry(
+                size: CGSize(width: Self.signInWidth(notch: notch, prompt: signIn.prompt) + grow.width, height: notch.height + grow.height),
+                cornerRadius: Self.compactCornerRadius,
+                isLifted: false
+            )
+        case .expanded where alert == .signIn:
+            return IslandGeometry(
+                size: CGSize(width: SignInExpandedView.width, height: notch.height + SignInExpandedView.bodyHeight),
+                cornerRadius: SignInExpandedView.cornerRadius,
+                isLifted: true
             )
         case .compact where alert == .lowBattery:
             return IslandGeometry(
@@ -166,9 +191,24 @@ final class NotchViewModel {
         notch.width + chargingWingWidth * 2
     }
 
+    /// Each wing of the sign-in pill: the lock on the left and the
+    /// fingerprint or check on the right, or, while typing, room for six
+    /// dots or "Password".
+    static let signInWingWidth: CGFloat = 56
+    static let passwordWingWidth: CGFloat = 77
+
+    static func signInWidth(notch: CGSize, prompt: SignInMonitor.Prompt?) -> CGFloat {
+        if case .password? = prompt {
+            return notch.width + passwordWingWidth * 2
+        }
+        return notch.width + signInWingWidth * 2
+    }
+
     // MARK: - Interaction
 
     func expand() {
+        // Nothing opens on the lock screen, where it would cover the clock.
+        guard !signIn.isScreenLocked else { return }
         collapseTask?.cancel()
         alertTask?.cancel()
         presentation = .expanded
@@ -208,9 +248,9 @@ final class NotchViewModel {
     private func batteryEvent(_ event: BatteryMonitor.Event) {
         switch event {
         case .pluggedIn:
-            showAlert(.charging, for: BatteryAlert.charging.duration)
+            showAlert(.charging, for: IslandAlert.charging.duration)
         case .lowBattery:
-            showAlert(.lowBattery, for: BatteryAlert.lowBattery.duration)
+            showAlert(.lowBattery, for: IslandAlert.lowBattery.duration)
         case .lowPowerModeEnabled:
             // Confirms the button just clicked briefly, or announces it being
             // turned on elsewhere.
@@ -218,9 +258,35 @@ final class NotchViewModel {
         }
     }
 
+    /// Takes over the island as the prompt appears, and leaves with it. It
+    /// opens into the square only when clicked, and never on the lock
+    /// screen, where the square would cover the clock.
+    private func signInChanged(_ prompt: SignInMonitor.Prompt?) {
+        guard prompt != nil else {
+            guard alert == .signIn else { return }
+            collapseTask?.cancel()
+            alertTask?.cancel()
+            alert = nil
+            presentation = .compact
+            return
+        }
+
+        if alert != .signIn {
+            collapseTask?.cancel()
+            alertTask?.cancel()
+            alert = .signIn
+            presentation = .compact
+        }
+        if signIn.isScreenLocked {
+            collapseTask?.cancel()
+            presentation = .compact
+        }
+    }
+
     /// Takes over the island, unless the battery details are already open,
-    /// in which case they just update.
-    private func showAlert(_ newAlert: BatteryAlert, for duration: Duration) {
+    /// in which case they just update. A sign-in prompt stays in front.
+    private func showAlert(_ newAlert: IslandAlert, for duration: Duration) {
+        guard alert != .signIn else { return }
         let isShowingDetails = alert != nil && presentation == .expanded
         alert = newAlert
         if !isShowingDetails {
@@ -234,7 +300,8 @@ final class NotchViewModel {
     /// leaving schedules it again.
     private func scheduleAlertDismissal(after delay: Duration) {
         alertTask?.cancel()
-        guard alert != nil else { return }
+        // A sign-in times itself, by its prompt.
+        guard alert != nil, alert != .signIn else { return }
         alertTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self, !self.isHovering, self.presentation != .expanded else { return }
