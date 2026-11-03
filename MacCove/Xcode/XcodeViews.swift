@@ -3,37 +3,14 @@ import SwiftUI
 extension Color {
     /// The design's Xcode blue, for the ring, the bar and Open in Xcode.
     static let xcodeBuild = Color(red: 62 / 255, green: 155 / 255, blue: 1)
-    /// Softer than the system red, so error text reads on black.
-    static let xcodeError = Color(red: 1, green: 105 / 255, blue: 97 / 255)
-    static let xcodeSucceeded = Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255)
 }
 
 /// Xcode's own app icon, or a hammer if Xcode can't be found.
 struct XcodeIcon: View {
-    /// The visible tile. App icons leave a transparent margin around it,
-    /// so the image is drawn a little larger than this.
     let size: CGFloat
 
-    private static let image = NSWorkspace.shared.urlForApplication(withBundleIdentifier: XcodeScripting.bundleIdentifier)
-        .map { NSWorkspace.shared.icon(forFile: $0.path(percentEncoded: false)) }
-    /// macOS app icons fill about 80% of their canvas.
-    private static let marginScale: CGFloat = 1.22
-
     var body: some View {
-        Group {
-            if let image = Self.image {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: size * Self.marginScale, height: size * Self.marginScale)
-            } else {
-                Image(systemName: "hammer.fill")
-                    .font(.system(size: (size * 0.7).rounded(), weight: .medium))
-                    .foregroundStyle(Color.xcodeBuild)
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        AppIcon(bundleIdentifier: XcodeScripting.bundleIdentifier, size: size, fallbackSystemName: "hammer.fill", fallbackTint: .xcodeBuild)
     }
 }
 
@@ -136,7 +113,7 @@ struct XcodeCompactView: View {
         case .inProgress where build.action == .run:
             Image(systemName: "play.fill")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.xcodeSucceeded)
+                .foregroundStyle(Color.islandSucceeded)
                 .frame(width: size, height: size)
         case .inProgress:
             TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -147,12 +124,12 @@ struct XcodeCompactView: View {
             Text(Self.failureSummary(build.action, count: errorCount))
                 .font(.system(size: 15, weight: .medium))
                 .monospacedDigit()
-                .foregroundStyle(Color.xcodeError)
+                .foregroundStyle(Color.islandError)
                 .lineLimit(1)
         case .succeeded:
             Image(systemName: "checkmark")
                 .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Color.xcodeSucceeded)
+                .foregroundStyle(Color.islandSucceeded)
                 .frame(width: size, height: size)
         }
     }
@@ -364,7 +341,7 @@ struct XcodeExpandedView: View {
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(lines) { line in
                 Text(line.text)
-                    .foregroundStyle(line.isError ? Color.xcodeError : .islandSecondary)
+                    .foregroundStyle(line.isError ? Color.islandError : .islandSecondary)
                     .lineLimit(Self.codeLineLimit)
                     .lineSpacing(lineSpacing)
                     .truncationMode(.tail)
@@ -389,11 +366,11 @@ struct XcodeExpandedView: View {
                     xcode.dismiss()
                 }
             case (.test, _):
-                chip("Test Again", background: .xcodeSucceeded, foreground: Color(red: 6 / 255, green: 33 / 255, blue: 15 / 255)) {
+                chip("Test Again", background: .islandSucceeded, foreground: Color(red: 6 / 255, green: 33 / 255, blue: 15 / 255)) {
                     xcode.test()
                 }
             default:
-                chip("Run", background: .xcodeSucceeded, foreground: Color(red: 6 / 255, green: 33 / 255, blue: 15 / 255)) {
+                chip("Run", background: .islandSucceeded, foreground: Color(red: 6 / 255, green: 33 / 255, blue: 15 / 255)) {
                     xcode.run()
                 }
             }

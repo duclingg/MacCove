@@ -12,89 +12,95 @@ extension ShapeStyle where Self == Color {
     }
 }
 
-/// Album art that flips over like a card, around its vertical axis, when
-/// `flipID` changes to a new track, as on the iPhone's Dynamic Island.
+/// Album art that blurs into the next track's cover.
+///
+/// A new track's art usually arrives a moment after its title, and the
+/// model has no art in between. The old cover stays up through that gap,
+/// so the app's icon never flashes between two covers; it only shows once
+/// a track has turned out to have no art at all.
 struct ArtworkView: View {
     let image: NSImage?
     let size: CGFloat
     let cornerRadius: CGFloat
-    /// The track the art belongs to. `nil` turns the flip off.
-    var flipID: String?
     /// Shown whole, without a tile, when there's no artwork: the playing
     /// app's icon, as on the iPhone.
     var fallbackIcon: NSImage?
 
-    /// What's drawn. Lags `image` while the old art turns away, so the new
-    /// art only appears on the far side of the flip.
+    /// What's drawn, which lags `image` while new art is on its way.
     @State private var displayedImage: NSImage?
-    /// Always the newest art, even mid-flip: it often finishes decoding a
-    /// moment after the track changes.
-    @State private var latestImage: NSImage?
-    @State private var isFlipping = false
+    /// Changes with each new cover, so the old one blurs out as the new one
+    /// blurs in.
+    @State private var version = 0
+    @State private var fallbackTask: Task<Void, Never>?
 
-    init(image: NSImage?, size: CGFloat, cornerRadius: CGFloat, flipID: String? = nil, fallbackIcon: NSImage? = nil) {
+    /// How long the old cover waits for the next one before giving way to
+    /// the app's icon.
+    private static let artworkGrace: Duration = .seconds(2)
+
+    init(image: NSImage?, size: CGFloat, cornerRadius: CGFloat, fallbackIcon: NSImage? = nil) {
         self.image = image
         self.size = size
         self.cornerRadius = cornerRadius
-        self.flipID = flipID
         self.fallbackIcon = fallbackIcon
         _displayedImage = State(initialValue: image)
-        _latestImage = State(initialValue: image)
     }
 
     var body: some View {
         ZStack {
-            if let displayedImage {
-                Image(nsImage: displayedImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fill)
-            } else if let fallbackIcon {
-                Image(nsImage: fallbackIcon)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-            } else {
+            artwork
+                .id(version)
+                .transition(.blurReplace)
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .onChange(of: image) { _, newImage in
+            fallbackTask?.cancel()
+            guard newImage == nil, displayedImage != nil else {
+                show(newImage)
+                return
+            }
+            fallbackTask = Task {
+                try? await Task.sleep(for: Self.artworkGrace)
+                guard !Task.isCancelled, image == nil else { return }
+                show(nil)
+            }
+        }
+        .onDisappear {
+            fallbackTask?.cancel()
+        }
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var artwork: some View {
+        if let displayedImage {
+            Image(nsImage: displayedImage)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+        } else if let fallbackIcon {
+            Image(nsImage: fallbackIcon)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        } else {
+            ZStack {
                 Color(white: 0.2)
                 Image(systemName: "music.note")
                     .font(.system(size: size * 0.45, weight: .medium))
                     .foregroundStyle(.islandSecondary)
             }
+            .frame(width: size, height: size)
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        // Turn the old art edge-on, jump to the far side, then turn the new
-        // art face-on with a little settle.
-        .keyframeAnimator(initialValue: 0.0, trigger: flipID ?? "") { content, angle in
-            content.rotation3DEffect(.degrees(angle), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
-        } keyframes: { _ in
-            KeyframeTrack {
-                CubicKeyframe(90, duration: Self.halfFlip)
-                MoveKeyframe(-90)
-                SpringKeyframe(0, duration: 0.34, spring: .bouncy)
-            }
-        }
-        .onChange(of: image) { _, newImage in
-            latestImage = newImage
-            if !isFlipping {
-                displayedImage = newImage
-            }
-        }
-        .onChange(of: flipID) { _, _ in
-            swapImageWhenEdgeOn()
-        }
-        .accessibilityHidden(true)
     }
 
-    nonisolated private static let halfFlip = 0.18
-
-    /// Holds the old art until it's edge-on, so the swap is never visible.
-    private func swapImageWhenEdgeOn() {
-        isFlipping = true
-        Task {
-            try? await Task.sleep(for: .seconds(Self.halfFlip))
-            displayedImage = latestImage
-            isFlipping = false
+    private func show(_ newImage: NSImage?) {
+        guard newImage !== displayedImage else { return }
+        withAnimation(.easeInOut(duration: 0.4)) {
+            displayedImage = newImage
+            version += 1
         }
     }
 }
