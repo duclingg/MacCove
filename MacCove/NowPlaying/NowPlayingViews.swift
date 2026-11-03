@@ -59,7 +59,7 @@ struct NowPlayingMinimalView: View {
     var routeSystemImage: String?
 
     var body: some View {
-        let artSize = CompactLayout(notch: notchSize).artSize
+        let artSize = BubbleLayout(notch: notchSize).artSize
 
         HStack(spacing: NotchViewModel.bubbleRouteGap) {
             ArtworkView(

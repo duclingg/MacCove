@@ -23,6 +23,8 @@ enum IslandActivity: Hashable {
     case xcode
     /// A terminal command that's taking a while, then how it ended.
     case terminal
+    /// A Claude Code session: working, waiting for approval, finished.
+    case claudeCode
     case nowPlaying
 
     /// How long a battery alert stays; the others leave by themselves.
@@ -30,22 +32,40 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .nowPlaying: .zero
         }
     }
 }
 
-/// An activity waiting beside the island, in a bubble of its own.
+/// Activities waiting beside the island, one bubble to a side. Two on the
+/// same side share it, their glyphs side by side, rather than queueing up
+/// in bubbles of their own.
 struct IslandBubble: Equatable, Identifiable {
-    let activity: IslandActivity
+    enum Side {
+        case leading
+        case trailing
+    }
+
+    /// One activity's part of the bubble, which opens it.
+    struct Segment: Equatable {
+        let activity: IslandActivity
+        /// In the same space as the bubble's frame.
+        let frame: CGRect
+    }
+
+    let side: Side
     /// From the top of the screen, with x measured from the island's
     /// centre line.
     let frame: CGRect
+    /// Left to right, the earlier activity nearest the island.
+    let segments: [Segment]
     /// A lone bubble has room for a second glyph beside the first: the
     /// speaker or headphones Now Playing is on, as the iPhone shows it.
     var isWide = false
 
-    var id: IslandActivity { activity }
+    /// By side, so a bubble that gains or loses an activity reshapes in
+    /// place instead of being swapped for another.
+    var id: Side { side }
 }
 
 struct IslandGeometry: Equatable {
@@ -63,9 +83,12 @@ final class NotchViewModel {
     let signIn: SignInMonitor
     let xcode: XcodeBuildMonitor
     let terminal: TerminalCommandMonitor
+    let claude: ClaudeCodeMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
+    /// The main display's width in points.
+    var screenWidth: CGFloat = 1512
 
     /// The island or bubble under the cursor.
     private(set) var hovered: IslandActivity?
@@ -97,7 +120,8 @@ final class NotchViewModel {
         battery: BatteryMonitor,
         signIn: SignInMonitor,
         xcode: XcodeBuildMonitor,
-        terminal: TerminalCommandMonitor
+        terminal: TerminalCommandMonitor,
+        claude: ClaudeCodeMonitor
     ) {
         self.nowPlaying = nowPlaying
         self.audioRoute = audioRoute
@@ -105,6 +129,7 @@ final class NotchViewModel {
         self.signIn = signIn
         self.xcode = xcode
         self.terminal = terminal
+        self.claude = claude
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
             self?.playbackChanged(playing: playing)
@@ -120,6 +145,9 @@ final class NotchViewModel {
         }
         terminal.onEvent = { [weak self] event in
             self?.terminalEvent(event)
+        }
+        claude.onEvent = { [weak self] event in
+            self?.claudeEvent(event)
         }
     }
 
@@ -140,10 +168,18 @@ final class NotchViewModel {
             return isShowingAll ? [batteryAlert] : []
         }
         // A build goes ahead of music, as on the iPhone, where a live
-        // activity you're waiting on leads.
+        // activity you're waiting on leads. An agent waiting for your
+        // answer goes ahead of everything, even over a full-screen app,
+        // since it can't go on without you.
         var running: [IslandActivity] = []
+        if claude.needsAnswer {
+            running.append(.claudeCode)
+        }
         if isShowingAll, xcode.build != nil {
             running.append(.xcode)
+        }
+        if isShowingAll, claude.session != nil, !claude.needsAnswer {
+            running.append(.claudeCode)
         }
         if isShowingAll, terminal.command != nil {
             running.append(.terminal)
@@ -225,6 +261,7 @@ final class NotchViewModel {
             case .charging?: Self.chargingWidth(notch: notch)
             case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
             case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
+            case .claudeCode?: Self.compactWidth(notch: notch)
             default: Self.compactWidth(notch: notch)
             }
             return IslandGeometry(
@@ -237,6 +274,7 @@ final class NotchViewModel {
             case .nowPlaying?: Self.expandedBodyHeight
             case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
+            case .claudeCode?: ClaudeCodeExpandedView.bodyHeight(for: claude.session)
             default: BatteryExpandedView.bodyHeight
             }
             return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
@@ -245,45 +283,66 @@ final class NotchViewModel {
 
     /// The second activity on the right of the pill, as on the iPhone. A
     /// third goes on the left when the front app's menus leave room for it
-    /// there, and otherwise beside the second. When the menus fill both
-    /// sides of the notch, there are no bubbles at all, so none covers a
-    /// menu; the others keep running and come back once there's room.
+    /// there, and otherwise joins the second's bubble. When the menus fill
+    /// both sides of the notch, there are no bubbles at all, so none covers
+    /// a menu; the others keep running and come back once there's room.
     /// Never beside the open island.
     var bubbles: [IslandBubble] {
         guard state == .compact, appMenus?.spillsPastCentre != true else { return [] }
-        let islandWidth = geometry.size.width
-        let others = activities.dropFirst()
-        var rightEdge = islandWidth / 2
-        return others.enumerated().map { index, activity in
-            let grow: CGFloat = hovered == activity ? Self.bubbleHoverGrowth : 0
-            // With three running, both bubbles stay square to take up as
-            // little of the menu bar as they can.
-            let isWide = others.count == 1 && activity == .nowPlaying && audioRoute.route != nil
-            let width = isWide ? Self.wideBubbleWidth(notch: notchSize) : notchSize.height
-            let size = CGSize(width: width + grow, height: notchSize.height + grow)
-            let midX: CGFloat
-            if index == 1, hasRoomLeftOfIsland(for: width) {
-                midX = -(islandWidth / 2 + Self.bubbleGap + size.width / 2)
-            } else {
-                midX = rightEdge + Self.bubbleGap + size.width / 2
-                rightEdge += Self.bubbleGap + size.width
-            }
-            return IslandBubble(
-                activity: activity,
-                frame: CGRect(x: midX - size.width / 2, y: 0, width: size.width, height: size.height),
-                isWide: isWide
-            )
+        var trailing = Array(activities.dropFirst())
+        guard !trailing.isEmpty else { return [] }
+        if trailing.count > 1, hasRoomLeftOfIsland(for: bubbleWidth(for: [trailing[1]])) {
+            let third = trailing.removeLast()
+            return [bubble(on: .trailing, for: trailing), bubble(on: .leading, for: [third])]
+        }
+        return [bubble(on: .trailing, for: trailing)]
+    }
+
+    /// A lone Now Playing bubble has room for the audio device too.
+    private func isWideBubble(for activities: [IslandActivity]) -> Bool {
+        activities == [.nowPlaying] && self.activities.count == 2 && audioRoute.route != nil
+    }
+
+    private func bubbleWidth(for activities: [IslandActivity]) -> CGFloat {
+        if activities.count > 1 {
+            Self.pairedBubbleWidth(notch: notchSize)
+        } else if isWideBubble(for: activities) {
+            Self.wideBubbleWidth(notch: notchSize)
+        } else {
+            BubbleLayout(notch: notchSize).segmentWidth
         }
     }
 
+    /// Hovering either glyph grows the whole bubble.
+    private func bubble(on side: IslandBubble.Side, for activities: [IslandActivity]) -> IslandBubble {
+        let width = bubbleWidth(for: activities)
+        let grow = hovered.map { activities.contains($0) } == true ? Self.bubbleHoverGrowth : 0
+        let size = CGSize(width: width + grow, height: notchSize.height + grow)
+        let distance = geometry.size.width / 2 + Self.bubbleGap + size.width / 2
+        let midX = side == .trailing ? distance : -distance
+        let frame = CGRect(x: midX - size.width / 2, y: 0, width: size.width, height: size.height)
+
+        // Split down the middle, so each half opens its own activity.
+        let ordered: [IslandActivity] = side == .trailing ? activities : activities.reversed()
+        let segmentWidth = frame.width / CGFloat(activities.count)
+        let segments = ordered.enumerated().map { index, activity in
+            IslandBubble.Segment(
+                activity: activity,
+                frame: CGRect(x: frame.minX + segmentWidth * CGFloat(index), y: 0, width: segmentWidth, height: frame.height)
+            )
+        }
+        return IslandBubble(side: side, frame: frame, segments: segments, isWide: isWideBubble(for: activities))
+    }
+
     /// Where the front app's menus reach, as `AppMenuExtent` measured them.
-    /// `nil` when there's no telling, which keeps bubbles off the left.
+    /// `nil` when there's no telling (Xcode won't say, for one): then
+    /// they're taken to be as long as Xcode's.
     var appMenus: AppMenuSpan?
 
     /// Judged as if the island and the bubble had both grown under the
     /// cursor, so hovering never sends a bubble to the other side.
     private func hasRoomLeftOfIsland(for bubbleWidth: CGFloat) -> Bool {
-        guard let appMenus else { return false }
+        let appMenus = appMenus ?? AppMenuSpan(trailingEdge: Self.unmeasuredMenusReach - screenWidth / 2, spillsPastCentre: false)
         let isIslandHovered = hovered != nil && hovered == primaryActivity
         let islandWidth = geometry.size.width + (isIslandHovered ? 0 : Self.hoverGrowth.width)
         let bubbleLeftEdge = -(islandWidth / 2 + Self.bubbleGap + bubbleWidth + Self.bubbleHoverGrowth + IslandShape.earWidth)
@@ -303,16 +362,30 @@ final class NotchViewModel {
     /// and the two read as separate shapes.
     static let bubbleGap: CGFloat = 18
     static let bubbleHoverGrowth: CGFloat = 3
+    /// How much wider than the notch is tall each activity's share of a
+    /// bubble is, so a ring round its glyph clears the bubble's sides.
+    static let bubbleExtraWidth: CGFloat = 6
     /// Left between the front app's last menu and a bubble beside it.
     static let menuClearance: CGFloat = 8
+    /// How far from the left edge to take menus no one could measure to
+    /// reach: Xcode's, among the longest, end at about 728pt. On a wide
+    /// external display that leaves room on the left; on a MacBook it
+    /// doesn't.
+    static let unmeasuredMenusReach: CGFloat = 740
     /// Between the artwork and the audio device in a wide bubble.
     static let bubbleRouteGap: CGFloat = 6
 
-    /// The artwork and the device, each in the pill's square, with the
-    /// same inset all round as above and below them.
+    /// Two activities' glyphs, each centred in a half as roomy as a
+    /// bubble of its own.
+    static func pairedBubbleWidth(notch: CGSize) -> CGFloat {
+        BubbleLayout(notch: notch).segmentWidth * 2
+    }
+
+    /// The artwork and the device, with the same side insets as a bubble
+    /// of their own.
     static func wideBubbleWidth(notch: CGSize) -> CGFloat {
-        let layout = CompactLayout(notch: notch)
-        return layout.verticalInset * 2 + layout.artSize * 2 + bubbleRouteGap
+        let layout = BubbleLayout(notch: notch)
+        return layout.sideInset * 2 + layout.artSize * 2 + bubbleRouteGap
     }
     static let expandedWidth: CGFloat = 420
     static let expandedCornerRadius: CGFloat = 32
@@ -487,6 +560,40 @@ final class NotchViewModel {
         }
     }
 
+    /// A permission request, question or plan opens the island and keeps
+    /// it open until it's answered, here or in the terminal.
+    private func claudeEvent(_ event: ClaudeCodeMonitor.Event) {
+        switch event {
+        case .started: activityStarted(.claudeCode)
+        case .needsAnswer: activityNeedsAnswer(.claudeCode)
+        case .answered: activityAnswered(.claudeCode)
+        case .finished: break
+        case .ended: activityEnded(.claudeCode)
+        }
+    }
+
+    /// Takes over the island, over anything else open, as an incoming call
+    /// does on the iPhone. Only the lock screen and a battery alert come
+    /// first.
+    private func activityNeedsAnswer(_ activity: IslandActivity) {
+        guard !isSigningIn, batteryAlert == nil else { return }
+        collapseTask?.cancel()
+        failureCollapseTask?.cancel()
+        expandedActivity = activity
+        presentation = .expanded
+    }
+
+    /// Answered: closes again, unless the cursor is on it.
+    private func activityAnswered(_ activity: IslandActivity) {
+        guard expandedActivity == activity, presentation == .expanded, !isHovering else { return }
+        presentation = .compact
+    }
+
+    /// Something waiting for an answer stays open when the cursor leaves.
+    private var isWaitingForAnswer: Bool {
+        presentation == .expanded && expandedActivity == .claudeCode && claude.needsAnswer
+    }
+
     /// A failure left open gives way to whatever its activity starts next,
     /// unless the cursor is on it.
     private func activityStarted(_ activity: IslandActivity) {
@@ -551,7 +658,7 @@ final class NotchViewModel {
         guard !isHovering, presentation == .expanded || isRevealedByHover else { return }
         collapseTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled, let self, !self.isHovering else { return }
+            guard !Task.isCancelled, let self, !self.isHovering, !self.isWaitingForAnswer else { return }
             self.presentation = .compact
             self.isRevealedByHover = false
             self.scheduleAlertDismissal(after: .seconds(1.2))
@@ -585,5 +692,27 @@ struct CompactLayout {
         // A little more at the side, as the iPhone has.
         sideInset = verticalInset + 2
         wingWidth = sideInset + artSize + 12
+    }
+}
+
+/// Inside a bubble beside the island, which is as tall as the notch. Each
+/// activity gets a share a little wider than that, with its glyph, or the
+/// ring round it, scaled to fit.
+struct BubbleLayout {
+    let segmentWidth: CGFloat
+    /// The same as the pill's artwork.
+    let artSize: CGFloat
+    let sideInset: CGFloat
+    let ringDiameter: CGFloat
+    let ringLineWidth: CGFloat
+
+    init(notch: CGSize) {
+        segmentWidth = notch.height + NotchViewModel.bubbleExtraWidth
+        artSize = CompactLayout(notch: notch).artSize
+        sideInset = (segmentWidth - artSize) / 2
+        // 30pt beside a 37pt notch, leaving a few points above and below.
+        ringDiameter = (notch.height * 0.8).rounded()
+        // To the nearest half point: 2.5 beside a 37pt notch.
+        ringLineWidth = (ringDiameter * 0.18).rounded() / 2
     }
 }

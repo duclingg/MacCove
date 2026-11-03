@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import os
 
 /// Where the front app's menus reach, from the island's centre line.
 nonisolated struct AppMenuSpan: Sendable, Equatable {
@@ -16,11 +17,12 @@ nonisolated struct AppMenuSpan: Sendable, Equatable {
 ///
 /// Only Accessibility can say where another app's menus are, and macOS
 /// gives no way to hide or move them, so without the permission there's
-/// no telling and the caller keeps the left side clear.
+/// no telling and the caller has to assume.
 nonisolated enum AppMenuExtent {
-    /// Long enough for an app that's busy, short enough that a hung one
-    /// doesn't hold up the island.
-    private static let timeout: Float = 0.25
+    /// Long enough for an app that's slow to answer, as Xcode is. It's
+    /// measured off the main thread, so the island never waits on it.
+    private static let timeout: Float = 1
+    private static let log = Logger(subsystem: "com.justinhoang.MacCove", category: "AppMenus")
 
     static var isAllowed: Bool {
         AXIsProcessTrusted()
@@ -34,9 +36,21 @@ nonisolated enum AppMenuExtent {
         AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
     }
 
+    /// From the menu: macOS's prompt, and the Accessibility list itself,
+    /// where a MacCove that's been rebuilt since it was allowed has to be
+    /// switched off and on again.
+    @MainActor
+    static func openSettings() {
+        requestPermission()
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// The menus of the app with `pid` on the main display's menu bar.
-    /// `nil` without the permission, or when its menus are on another
-    /// display.
+    /// `nil` without the permission, when its menus are on another
+    /// display, or when it won't say: Xcode has no menu bar as far as
+    /// Accessibility can tell.
     @concurrent
     static func span(of pid: pid_t, mainDisplayFrame: CGRect, menuBarHeight: CGFloat) async -> AppMenuSpan? {
         guard AXIsProcessTrusted() else { return nil }
@@ -54,7 +68,11 @@ nonisolated enum AppMenuExtent {
                   frame.minX >= 0, frame.minX < mainDisplayFrame.width else { return nil }
             return frame
         }
-        guard !frames.isEmpty else { return nil }
+        guard !frames.isEmpty else {
+            let first = items.first.flatMap { frame(of: $0) }.map { "\($0)" } ?? "unknown"
+            log.debug("None of \(items.count) menus is on the menu bar; the first is at \(first, privacy: .public)")
+            return nil
+        }
         let left = frames.filter { $0.midX < centre }
         return AppMenuSpan(
             trailingEdge: (left.map(\.maxX).max() ?? 0) - centre,
@@ -73,7 +91,11 @@ nonisolated enum AppMenuExtent {
 
     private static func value<T>(of attribute: String, in element: AXUIElement) -> T? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
+        let error = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+        guard error == .success else {
+            log.debug("\(attribute, privacy: .public) failed with AXError \(error.rawValue)")
+            return nil
+        }
         return value as? T
     }
 }

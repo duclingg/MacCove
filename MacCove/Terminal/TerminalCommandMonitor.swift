@@ -121,6 +121,28 @@ final class TerminalCommandMonitor {
         }
     }
 
+    /// ^C from the island: SIGINT to whatever's in front in the command's
+    /// terminal. Its end report, exit code 130, takes it off the island. If
+    /// the terminal can't be found, its window comes forward instead.
+    func stop() {
+        guard let shown = command, shown.phase == .running else { return }
+        guard let shell = shown.shellPID, let group = Self.foregroundGroup(ofShell: shell), killpg(group, SIGINT) == 0 else {
+            TerminalWindow.bringForward(appBundleIdentifier: shown.appBundleIdentifier, tty: shown.tty)
+            return
+        }
+    }
+
+    /// The process group in front in the shell's terminal, unless that's
+    /// the shell itself, back at its prompt.
+    private static func foregroundGroup(ofShell shell: pid_t) -> pid_t? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib = [CTL_KERN, KERN_PROC, KERN_PROC_PID, shell]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let group = info.kp_eproc.e_tpgid
+        return group > 0 && group != info.kp_eproc.e_pgid ? group : nil
+    }
+
     // MARK: - Reports from the hook
 
     /// The newest command takes the island, over a result still showing.

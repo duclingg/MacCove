@@ -90,6 +90,9 @@ struct IslandView: View {
                 case .terminal?:
                     TerminalCompactView(terminal: viewModel.terminal, notchSize: notch)
                         .transition(.islandContent)
+                case .claudeCode?:
+                    ClaudeCodeCompactView(claude: viewModel.claude, notchSize: notch)
+                        .transition(.islandContent)
                 case .nowPlaying?:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
@@ -101,8 +104,8 @@ struct IslandView: View {
                     EmptyView()
                 }
             case .expanded:
-                // Sign-in never opens, so anything but the player, a build or
-                // a command here is the battery's.
+                // Sign-in never opens, so anything but the player, a build, a
+                // command or an agent here is the battery's.
                 switch viewModel.primaryActivity {
                 case .nowPlaying?:
                     NowPlayingExpandedView(
@@ -118,6 +121,9 @@ struct IslandView: View {
                 case .terminal?:
                     TerminalExpandedView(terminal: viewModel.terminal, notchHeight: notch.height)
                         .transition(.islandContent)
+                case .claudeCode?:
+                    ClaudeCodeExpandedView(claude: viewModel.claude, notchHeight: notch.height)
+                        .transition(.islandContent)
                 default:
                     BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
                         .transition(.islandContent)
@@ -127,9 +133,9 @@ struct IslandView: View {
     }
 }
 
-/// An activity waiting beside the island: the same black, hanging from the
-/// top edge the same way, with its own content centred in it. Clicking it
-/// opens that activity.
+/// Activities waiting beside the island: the same black, hanging from the
+/// top edge the same way, with each one's content centred in its share of
+/// it. Clicking one opens that activity.
 private struct IslandBubbleView: View {
     let bubble: IslandBubble
     let viewModel: NotchViewModel
@@ -148,18 +154,24 @@ private struct IslandBubbleView: View {
                 .fill(.black)
                 .frame(width: size.width + IslandShape.earWidth * 2, height: size.height)
 
-            content
-                .frame(width: size.width, height: size.height)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    viewModel.expand(bubble.activity)
+            HStack(spacing: 0) {
+                ForEach(bubble.segments, id: \.activity) { segment in
+                    content(for: segment.activity)
+                        .frame(width: size.width / CGFloat(bubble.segments.count), height: size.height)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            viewModel.expand(segment.activity)
+                        }
+                        .transition(.islandContent)
                 }
+            }
+            .frame(width: size.width, height: size.height)
         }
     }
 
     @ViewBuilder
-    private var content: some View {
-        switch bubble.activity {
+    private func content(for activity: IslandActivity) -> some View {
+        switch activity {
         case .nowPlaying:
             NowPlayingMinimalView(
                 nowPlaying: viewModel.nowPlaying,
@@ -170,6 +182,8 @@ private struct IslandBubbleView: View {
             XcodeMinimalView(xcode: viewModel.xcode, notchSize: viewModel.notchSize)
         case .terminal:
             TerminalMinimalView(terminal: viewModel.terminal, notchSize: viewModel.notchSize)
+        case .claudeCode:
+            ClaudeCodeMinimalView(claude: viewModel.claude, notchSize: viewModel.notchSize)
         case .signIn, .charging, .lowBattery:
             // A prompt always leads, and a battery alert shows alone.
             EmptyView()
