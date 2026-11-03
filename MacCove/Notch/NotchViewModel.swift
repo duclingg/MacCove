@@ -9,6 +9,22 @@ enum IslandState {
     case expanded
 }
 
+/// A battery event that takes the island over for a few seconds, ahead of
+/// Now Playing, as on the iPhone.
+enum BatteryAlert: Equatable {
+    /// "Charging" beside the notch while the battery fills up.
+    case charging
+    /// The level and a button for Low Power Mode, or its confirmation.
+    case lowBattery
+
+    var duration: Duration {
+        switch self {
+        case .charging: .seconds(3)
+        case .lowBattery: .seconds(6)
+        }
+    }
+}
+
 struct IslandGeometry: Equatable {
     var size: CGSize
     var cornerRadius: CGFloat
@@ -20,6 +36,7 @@ struct IslandGeometry: Equatable {
 final class NotchViewModel {
     let nowPlaying: NowPlayingModel
     let audioRoute: AudioRouteMonitor
+    let battery: BatteryMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
@@ -35,25 +52,32 @@ final class NotchViewModel {
     /// A full-screen app is in front on this display: the island steps
     /// aside, as on the iPhone.
     private var isFullScreenActive = false
+    /// Shown in place of Now Playing until it times out.
+    private(set) var alert: BatteryAlert?
 
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
+    @ObservationIgnored private var alertTask: Task<Void, Never>?
 
-    init(nowPlaying: NowPlayingModel, audioRoute: AudioRouteMonitor) {
+    init(nowPlaying: NowPlayingModel, audioRoute: AudioRouteMonitor, battery: BatteryMonitor) {
         self.nowPlaying = nowPlaying
         self.audioRoute = audioRoute
+        self.battery = battery
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
             self?.playbackChanged(playing: playing)
         }
+        battery.onEvent = { [weak self] event in
+            self?.batteryEvent(event)
+        }
     }
 
     var state: IslandState {
-        guard nowPlaying.hasMedia else { return .idle }
+        guard nowPlaying.hasMedia || alert != nil else { return .idle }
         // Brought back on purpose: shown whatever else is going on.
         if isRevealedByHover { return presentation }
         if isFullScreenActive { return .idle }
-        if presentation == .compact, isDismissedForPause { return .idle }
+        if alert == nil, presentation == .compact, isDismissedForPause { return .idle }
         return presentation
     }
 
@@ -83,15 +107,23 @@ final class NotchViewModel {
                 cornerRadius: Self.compactCornerRadius,
                 isLifted: false
             )
+        case .compact where alert == .lowBattery:
+            return IslandGeometry(
+                size: CGSize(width: Self.expandedWidth, height: notch.height + Self.alertBodyHeight),
+                cornerRadius: Self.alertCornerRadius,
+                isLifted: true
+            )
         case .compact:
             let grow: CGSize = isHovering ? CGSize(width: 8, height: 3) : .zero
+            let width = alert == .charging ? Self.chargingWidth(notch: notch) : Self.compactWidth(notch: notch)
             return IslandGeometry(
-                size: CGSize(width: Self.compactWidth(notch: notch) + grow.width, height: notch.height + grow.height),
+                size: CGSize(width: width + grow.width, height: notch.height + grow.height),
                 cornerRadius: Self.compactCornerRadius,
                 isLifted: false
             )
         case .expanded:
-            return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + Self.expandedBodyHeight), cornerRadius: Self.expandedCornerRadius, isLifted: true)
+            let body = alert == nil ? Self.expandedBodyHeight : BatteryExpandedView.bodyHeight
+            return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
         }
     }
 
@@ -117,14 +149,28 @@ final class NotchViewModel {
     static let expandedBodyHeight: CGFloat = expandedTopGap + 64 + expandedHeaderGap + PlaybackProgressView.height
         + expandedControlsGap + 44 + expandedBottomGap
 
+    /// Each wing of the charging pill: room for "Charging" on the left and
+    /// "100%" with the battery on the right.
+    static let chargingWingWidth: CGFloat = 104
+    /// The low battery alert, under the notch row: the text and the 57pt
+    /// Low Power Mode button with their gaps.
+    static let alertTopGap: CGFloat = 8
+    static let alertBodyHeight: CGFloat = alertTopGap + 57 + 14
+    static let alertCornerRadius: CGFloat = 38
+
     static func compactWidth(notch: CGSize) -> CGFloat {
         notch.width + CompactLayout(notch: notch).wingWidth * 2
+    }
+
+    static func chargingWidth(notch: CGSize) -> CGFloat {
+        notch.width + chargingWingWidth * 2
     }
 
     // MARK: - Interaction
 
     func expand() {
         collapseTask?.cancel()
+        alertTask?.cancel()
         presentation = .expanded
     }
 
@@ -132,6 +178,12 @@ final class NotchViewModel {
         guard hovering != isHovering else { return }
         isHovering = hovering
         scheduleCollapseIfNeeded()
+        // An alert stays while the cursor is on it, then leaves shortly after.
+        if hovering {
+            alertTask?.cancel()
+        } else if presentation == .compact {
+            scheduleAlertDismissal(after: .seconds(1.2))
+        }
     }
 
     /// Entering full screen closes the player too, so it doesn't come back
@@ -153,6 +205,43 @@ final class NotchViewModel {
         setHovering(true)
     }
 
+    private func batteryEvent(_ event: BatteryMonitor.Event) {
+        switch event {
+        case .pluggedIn:
+            showAlert(.charging, for: BatteryAlert.charging.duration)
+        case .lowBattery:
+            showAlert(.lowBattery, for: BatteryAlert.lowBattery.duration)
+        case .lowPowerModeEnabled:
+            // Confirms the button just clicked briefly, or announces it being
+            // turned on elsewhere.
+            showAlert(.lowBattery, for: alert == .lowBattery ? .seconds(2.5) : .seconds(4))
+        }
+    }
+
+    /// Takes over the island, unless the battery details are already open,
+    /// in which case they just update.
+    private func showAlert(_ newAlert: BatteryAlert, for duration: Duration) {
+        let isShowingDetails = alert != nil && presentation == .expanded
+        alert = newAlert
+        if !isShowingDetails {
+            collapseTask?.cancel()
+            presentation = .compact
+        }
+        scheduleAlertDismissal(after: duration)
+    }
+
+    /// Never while the cursor is on the island or the details are open;
+    /// leaving schedules it again.
+    private func scheduleAlertDismissal(after delay: Duration) {
+        alertTask?.cancel()
+        guard alert != nil else { return }
+        alertTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self, !self.isHovering, self.presentation != .expanded else { return }
+            self.alert = nil
+        }
+    }
+
     /// A short grace period, so a quick pause-and-resume doesn't make the
     /// island flicker away and back.
     private func playbackChanged(playing: Bool) {
@@ -169,7 +258,8 @@ final class NotchViewModel {
     }
 
     /// Half a second after the cursor leaves, the expanded player closes and
-    /// an island brought back by the hover strip tucks away again.
+    /// an island brought back by the hover strip tucks away again. Battery
+    /// details go back to the alert, which then leaves too.
     private func scheduleCollapseIfNeeded() {
         collapseTask?.cancel()
         guard !isHovering, presentation == .expanded || isRevealedByHover else { return }
@@ -178,6 +268,7 @@ final class NotchViewModel {
             guard !Task.isCancelled, let self, !self.isHovering else { return }
             self.presentation = .compact
             self.isRevealedByHover = false
+            self.scheduleAlertDismissal(after: .seconds(1.2))
         }
     }
 }

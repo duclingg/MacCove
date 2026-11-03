@@ -30,7 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let audioRoute = AudioRouteMonitor(music: music) { [weak nowPlaying] in
             nowPlaying?.isAppleMusicPlaying == true
         }
-        notchController = NotchWindowController(viewModel: NotchViewModel(nowPlaying: nowPlaying, audioRoute: audioRoute))
+        let battery = BatteryMonitor()
+        notchController = NotchWindowController(
+            viewModel: NotchViewModel(nowPlaying: nowPlaying, audioRoute: audioRoute, battery: battery)
+        )
         nowPlaying.start()
+        battery.start()
     }
 }

@@ -181,6 +181,11 @@ struct IslandIconButton: View {
     var tint: Color = .white
     let action: () -> Void
 
+    /// The hover circle is wider than the 44pt button so even the play
+    /// glyph has room around it. It spills into the gaps around the
+    /// controls row without changing the layout.
+    private static let hoverDiameter: CGFloat = 52
+
     @State private var isHovering = false
 
     var body: some View {
@@ -190,7 +195,11 @@ struct IslandIconButton: View {
                 .foregroundStyle(tint)
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: 44, height: 44)
-                .background(Circle().fill(.white.opacity(isHovering ? 0.12 : 0)))
+                .background(
+                    Circle()
+                        .fill(.white.opacity(isHovering ? 0.12 : 0))
+                        .frame(width: Self.hoverDiameter, height: Self.hoverDiameter)
+                )
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

@@ -9,7 +9,19 @@
 /* Begin PBXBuildFile section */
 		C0FE00122ED7A00100A1B2C3 /* MediaRemoteAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = C0FE00112ED7A00100A1B2C3 /* MediaRemoteAdapter */; };
 		C0FE00132ED7A00100A1B2C3 /* MediaRemoteAdapter in Embed Frameworks */ = {isa = PBXBuildFile; productRef = C0FE00112ED7A00100A1B2C3 /* MediaRemoteAdapter */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		C0FE00202ED7A00100A1B2C3 /* MacCoveHelper in Embed Helper */ = {isa = PBXBuildFile; fileRef = C0FE00152ED7A00100A1B2C3 /* MacCoveHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		C0FE00242ED7A00100A1B2C3 /* com.ducling.MacCove.helper.plist in Embed Launch Daemon */ = {isa = PBXBuildFile; fileRef = C0FE00222ED7A00100A1B2C3 /* com.ducling.MacCove.helper.plist */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C0FE001F2ED7A00100A1B2C3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C0FE000A2ED7A00100A1B2C3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C0FE00182ED7A00100A1B2C3;
+			remoteInfo = MacCoveHelper;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		C0FE00142ED7A00100A1B2C3 /* Embed Frameworks */ = {
@@ -23,16 +35,50 @@
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0FE00212ED7A00100A1B2C3 /* Embed Helper */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				C0FE00202ED7A00100A1B2C3 /* MacCoveHelper in Embed Helper */,
+			);
+			name = "Embed Helper";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0FE00252ED7A00100A1B2C3 /* Embed Launch Daemon */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Library/LaunchDaemons;
+			dstSubfolderSpec = 1;
+			files = (
+				C0FE00242ED7A00100A1B2C3 /* com.ducling.MacCove.helper.plist in Embed Launch Daemon */,
+			);
+			name = "Embed Launch Daemon";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		C0FE00012ED7A00100A1B2C3 /* MacCove.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacCove.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0FE00152ED7A00100A1B2C3 /* MacCoveHelper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = MacCoveHelper; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0FE00222ED7A00100A1B2C3 /* com.ducling.MacCove.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.ducling.MacCove.helper.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C0FE00022ED7A00100A1B2C3 /* MacCove */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = MacCove;
+			sourceTree = "<group>";
+		};
+		C0FE00162ED7A00100A1B2C3 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		C0FE00172ED7A00100A1B2C3 /* MacCoveHelper */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MacCoveHelper;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -46,6 +92,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0FE001A2ED7A00100A1B2C3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -53,6 +106,9 @@
 			isa = PBXGroup;
 			children = (
 				C0FE00022ED7A00100A1B2C3 /* MacCove */,
+				C0FE00172ED7A00100A1B2C3 /* MacCoveHelper */,
+				C0FE00162ED7A00100A1B2C3 /* Shared */,
+				C0FE00232ED7A00100A1B2C3 /* LaunchDaemons */,
 				C0FE00052ED7A00100A1B2C3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -61,8 +117,17 @@
 			isa = PBXGroup;
 			children = (
 				C0FE00012ED7A00100A1B2C3 /* MacCove.app */,
+				C0FE00152ED7A00100A1B2C3 /* MacCoveHelper */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C0FE00232ED7A00100A1B2C3 /* LaunchDaemons */ = {
+			isa = PBXGroup;
+			children = (
+				C0FE00222ED7A00100A1B2C3 /* com.ducling.MacCove.helper.plist */,
+			);
+			path = LaunchDaemons;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -76,13 +141,17 @@
 				C0FE00032ED7A00100A1B2C3 /* Frameworks */,
 				C0FE00092ED7A00100A1B2C3 /* Resources */,
 				C0FE00142ED7A00100A1B2C3 /* Embed Frameworks */,
+				C0FE00212ED7A00100A1B2C3 /* Embed Helper */,
+				C0FE00252ED7A00100A1B2C3 /* Embed Launch Daemon */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				C0FE001E2ED7A00100A1B2C3 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C0FE00022ED7A00100A1B2C3 /* MacCove */,
+				C0FE00162ED7A00100A1B2C3 /* Shared */,
 			);
 			name = MacCove;
 			packageProductDependencies = (
@@ -91,6 +160,28 @@
 			productName = MacCove;
 			productReference = C0FE00012ED7A00100A1B2C3 /* MacCove.app */;
 			productType = "com.apple.product-type.application";
+		};
+		C0FE00182ED7A00100A1B2C3 /* MacCoveHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C0FE001B2ED7A00100A1B2C3 /* Build configuration list for PBXNativeTarget "MacCoveHelper" */;
+			buildPhases = (
+				C0FE00192ED7A00100A1B2C3 /* Sources */,
+				C0FE001A2ED7A00100A1B2C3 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C0FE00162ED7A00100A1B2C3 /* Shared */,
+				C0FE00172ED7A00100A1B2C3 /* MacCoveHelper */,
+			);
+			name = MacCoveHelper;
+			packageProductDependencies = (
+			);
+			productName = MacCoveHelper;
+			productReference = C0FE00152ED7A00100A1B2C3 /* MacCoveHelper */;
+			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
@@ -103,6 +194,9 @@
 				LastUpgradeCheck = 2720;
 				TargetAttributes = {
 					C0FE00062ED7A00100A1B2C3 = {
+						CreatedOnToolsVersion = 27.2;
+					};
+					C0FE00182ED7A00100A1B2C3 = {
 						CreatedOnToolsVersion = 27.2;
 					};
 				};
@@ -125,6 +219,7 @@
 			projectRoot = "";
 			targets = (
 				C0FE00062ED7A00100A1B2C3 /* MacCove */,
+				C0FE00182ED7A00100A1B2C3 /* MacCoveHelper */,
 			);
 		};
 /* End PBXProject section */
@@ -147,7 +242,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C0FE00192ED7A00100A1B2C3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C0FE001E2ED7A00100A1B2C3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C0FE00182ED7A00100A1B2C3 /* MacCoveHelper */;
+			targetProxy = C0FE001F2ED7A00100A1B2C3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		C0FE000C2ED7A00100A1B2C3 /* Debug */ = {
@@ -290,6 +400,38 @@
 			};
 			name = Release;
 		};
+		C0FE001C2ED7A00100A1B2C3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				DEVELOPMENT_TEAM = 9MZKF3V7G9;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ducling.MacCove.helper;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		C0FE001D2ED7A00100A1B2C3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				DEVELOPMENT_TEAM = 9MZKF3V7G9;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ducling.MacCove.helper;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -307,6 +449,15 @@
 			buildConfigurations = (
 				C0FE000C2ED7A00100A1B2C3 /* Debug */,
 				C0FE000D2ED7A00100A1B2C3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C0FE001B2ED7A00100A1B2C3 /* Build configuration list for PBXNativeTarget "MacCoveHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0FE001C2ED7A00100A1B2C3 /* Debug */,
+				C0FE001D2ED7A00100A1B2C3 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

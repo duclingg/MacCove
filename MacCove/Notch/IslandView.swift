@@ -66,20 +66,34 @@ struct IslandView: View {
             case .idle:
                 EmptyView()
             case .compact:
-                NowPlayingCompactView(
-                    nowPlaying: nowPlaying,
-                    notchSize: notch,
-                    routeSystemImage: viewModel.audioRoute.route?.systemImage
-                )
-                .transition(.islandContent)
+                switch viewModel.alert {
+                case .charging?:
+                    ChargingCompactView(battery: viewModel.battery, notchSize: notch)
+                        .transition(.islandContent)
+                case .lowBattery?:
+                    LowBatteryAlertView(battery: viewModel.battery, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case nil:
+                    NowPlayingCompactView(
+                        nowPlaying: nowPlaying,
+                        notchSize: notch,
+                        routeSystemImage: viewModel.audioRoute.route?.systemImage
+                    )
+                    .transition(.islandContent)
+                }
             case .expanded:
-                NowPlayingExpandedView(
-                    nowPlaying: nowPlaying,
-                    notchHeight: notch.height,
-                    route: viewModel.audioRoute.route,
-                    sourceName: viewModel.audioRoute.sourceName
-                )
-                .transition(.islandContent)
+                if viewModel.alert != nil {
+                    BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
+                        .transition(.islandContent)
+                } else {
+                    NowPlayingExpandedView(
+                        nowPlaying: nowPlaying,
+                        notchHeight: notch.height,
+                        route: viewModel.audioRoute.route,
+                        sourceName: viewModel.audioRoute.sourceName
+                    )
+                    .transition(.islandContent)
+                }
             }
         }
     }
