@@ -4,6 +4,9 @@ import SwiftUI
 struct MacCoveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var launchAtLogin = LaunchAtLogin()
+    /// Bubbles stay clear of the front app's menus only with Accessibility
+    /// access.
+    @State private var hasAccessibility = AppMenuExtent.isAllowed
     @AppStorage(TerminalHook.thresholdKey) private var terminalThreshold = TerminalHook.defaultThreshold
 
     var body: some Scene {
@@ -12,12 +15,20 @@ struct MacCoveApp: App {
                 get: { launchAtLogin.isEnabled },
                 set: { launchAtLogin.setEnabled($0) }
             ))
-            .onAppear { launchAtLogin.refresh() }
+            .onAppear {
+                launchAtLogin.refresh()
+                hasAccessibility = AppMenuExtent.isAllowed
+            }
             Button("Set Up Xcode Builds…") {
                 XcodeBehaviorScripts.showSetup()
             }
             Button("Set Up Terminal Commands…") {
                 TerminalHook.showSetup()
+            }
+            if !hasAccessibility {
+                Button("Allow Accessibility Access…") {
+                    AppMenuExtent.openSettings()
+                }
             }
             Picker("Show Terminal Commands After", selection: Binding(
                 get: { terminalThreshold },

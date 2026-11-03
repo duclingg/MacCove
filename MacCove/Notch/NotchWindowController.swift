@@ -1,4 +1,5 @@
 import AppKit
+import os
 import SwiftUI
 
 /// Owns the notch panel: keeps it centred on the main display and decides
@@ -27,6 +28,11 @@ final class NotchWindowController {
     /// Accessibility is asked for once, the first time a bubble needs a
     /// place; after that it's up to System Settings.
     private static let askedForAccessibilityKey = "AskedForMenuBarAccessibility"
+    /// An app that has just come to the front may not have laid out its
+    /// menus yet, and Accessibility then reports few or none: measured
+    /// again after each of these.
+    private static let menuMeasurementDelays: [Duration] = [.milliseconds(150), .milliseconds(500), .seconds(1.5)]
+    private static let log = Logger(subsystem: "com.justinhoang.MacCove", category: "AppMenus")
 
     init(viewModel: NotchViewModel) {
         self.viewModel = viewModel
@@ -150,12 +156,32 @@ final class NotchWindowController {
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
 
         let pid = app.processIdentifier
+        let name = app.bundleIdentifier ?? "\(pid)"
         let frame = screen.frame
         let menuBarHeight = max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
+        // Measured each time, as menus can still be filling in at first.
+        // Less room than before shows straight away, so no bubble sits on a
+        // menu; more room waits for the last measurement, so bubbles don't
+        // hop left and back.
         menuMeasurement = Task { [weak self] in
-            let span = await AppMenuExtent.span(of: pid, mainDisplayFrame: frame, menuBarHeight: menuBarHeight)
+            var settled: AppMenuSpan?
+            for delay in Self.menuMeasurementDelays {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                guard let span = await AppMenuExtent.span(of: pid, mainDisplayFrame: frame, menuBarHeight: menuBarHeight) else { continue }
+                guard !Task.isCancelled, let self else { return }
+                Self.log.debug("\(name, privacy: .public) menus reach \(span.trailingEdge) from centre, past it: \(span.spillsPastCentre)")
+                settled = span
+                if let current = self.viewModel.appMenus,
+                   span.trailingEdge > current.trailingEdge || (span.spillsPastCentre && !current.spillsPastCentre) {
+                    self.viewModel.appMenus = span
+                }
+            }
             guard !Task.isCancelled, let self else { return }
-            self.viewModel.appMenus = span
+            if settled == nil {
+                Self.log.debug("\(name, privacy: .public) menus couldn't be measured")
+            }
+            self.viewModel.appMenus = settled
         }
     }
 
@@ -169,6 +195,7 @@ final class NotchWindowController {
         self.screen = screen
         viewModel.notchSize = screen.notchSize
         viewModel.hasPhysicalNotch = screen.hasNotch
+        viewModel.screenWidth = screen.frame.width
 
         let size = Self.canvasSize
         let frame = NSRect(
@@ -211,8 +238,8 @@ final class NotchWindowController {
         let islandFrame = NSRect(x: screen.frame.midX - island.width / 2, y: top - island.height, width: island.width, height: island.height + 1)
         var hovered = islandFrame.contains(mouse) ? viewModel.primaryActivity : nil
         if hovered == nil {
-            hovered = viewModel.bubbles.first { bubble in
-                let frame = bubble.frame
+            hovered = viewModel.bubbles.flatMap(\.segments).first { segment in
+                let frame = segment.frame
                 return NSRect(x: screen.frame.midX + frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height + 1)
                     .contains(mouse)
             }?.activity

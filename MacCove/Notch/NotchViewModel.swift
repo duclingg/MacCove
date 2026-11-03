@@ -35,17 +35,35 @@ enum IslandActivity: Hashable {
     }
 }
 
-/// An activity waiting beside the island, in a bubble of its own.
+/// Activities waiting beside the island, one bubble to a side. Two on the
+/// same side share it, their glyphs side by side, rather than queueing up
+/// in bubbles of their own.
 struct IslandBubble: Equatable, Identifiable {
-    let activity: IslandActivity
+    enum Side {
+        case leading
+        case trailing
+    }
+
+    /// One activity's part of the bubble, which opens it.
+    struct Segment: Equatable {
+        let activity: IslandActivity
+        /// In the same space as the bubble's frame.
+        let frame: CGRect
+    }
+
+    let side: Side
     /// From the top of the screen, with x measured from the island's
     /// centre line.
     let frame: CGRect
     /// A lone bubble has room for a second glyph beside the first: the
     /// speaker or headphones Now Playing is on, as the iPhone shows it.
+    /// Left to right, the earlier activity nearest the island.
+    let segments: [Segment]
     var isWide = false
 
-    var id: IslandActivity { activity }
+    /// By side, so a bubble that gains or loses an activity reshapes in
+    /// place instead of being swapped for another.
+    var id: Side { side }
 }
 
 struct IslandGeometry: Equatable {
@@ -69,6 +87,8 @@ final class NotchViewModel {
 
     /// The island or bubble under the cursor.
     private(set) var hovered: IslandActivity?
+    /// The main display's width in points.
+    var screenWidth: CGFloat = 1512
     private var presentation: IslandState = .compact
     /// What was clicked open, which leads while the island is expanded.
     private var expandedActivity: IslandActivity?
@@ -245,45 +265,65 @@ final class NotchViewModel {
 
     /// The second activity on the right of the pill, as on the iPhone. A
     /// third goes on the left when the front app's menus leave room for it
-    /// there, and otherwise beside the second. When the menus fill both
-    /// sides of the notch, there are no bubbles at all, so none covers a
-    /// menu; the others keep running and come back once there's room.
+    /// there, and otherwise joins the second's bubble. When the menus fill
+    /// both sides of the notch, there are no bubbles at all, so none covers
+    /// a menu; the others keep running and come back once there's room.
     /// Never beside the open island.
     var bubbles: [IslandBubble] {
         guard state == .compact, appMenus?.spillsPastCentre != true else { return [] }
-        let islandWidth = geometry.size.width
-        let others = activities.dropFirst()
-        var rightEdge = islandWidth / 2
-        return others.enumerated().map { index, activity in
-            let grow: CGFloat = hovered == activity ? Self.bubbleHoverGrowth : 0
-            // With three running, both bubbles stay square to take up as
-            // little of the menu bar as they can.
-            let isWide = others.count == 1 && activity == .nowPlaying && audioRoute.route != nil
-            let width = isWide ? Self.wideBubbleWidth(notch: notchSize) : notchSize.height
-            let size = CGSize(width: width + grow, height: notchSize.height + grow)
-            let midX: CGFloat
-            if index == 1, hasRoomLeftOfIsland(for: width) {
-                midX = -(islandWidth / 2 + Self.bubbleGap + size.width / 2)
-            } else {
-                midX = rightEdge + Self.bubbleGap + size.width / 2
-                rightEdge += Self.bubbleGap + size.width
-            }
-            return IslandBubble(
+        var trailing = Array(activities.dropFirst())
+        guard !trailing.isEmpty else { return [] }
+        if trailing.count > 1, hasRoomLeftOfIsland(for: bubbleWidth(for: [trailing[1]])) {
+            let third = trailing.removeLast()
+            return [bubble(on: .trailing, for: trailing), bubble(on: .leading, for: [third])]
+        }
+        return [bubble(on: .trailing, for: trailing)]
+    }
+
+    /// A lone Now Playing bubble has room for the audio device too.
+    private func isWideBubble(for activities: [IslandActivity]) -> Bool {
+        activities == [.nowPlaying] && self.activities.count == 2 && audioRoute.route != nil
+    }
+
+    private func bubbleWidth(for activities: [IslandActivity]) -> CGFloat {
+        if activities.count > 1 {
+            Self.pairedBubbleWidth(notch: notchSize)
+        } else if isWideBubble(for: activities) {
+            Self.wideBubbleWidth(notch: notchSize)
+        } else {
+            notchSize.height
+        }
+    }
+
+    /// Hovering either glyph grows the whole bubble.
+    private func bubble(on side: IslandBubble.Side, for activities: [IslandActivity]) -> IslandBubble {
+        let width = bubbleWidth(for: activities)
+        let grow = hovered.map { activities.contains($0) } == true ? Self.bubbleHoverGrowth : 0
+        let size = CGSize(width: width + grow, height: notchSize.height + grow)
+        let distance = geometry.size.width / 2 + Self.bubbleGap + size.width / 2
+        let midX = side == .trailing ? distance : -distance
+        let frame = CGRect(x: midX - size.width / 2, y: 0, width: size.width, height: size.height)
+
+        // Split down the middle, so each half opens its own activity.
+        let ordered: [IslandActivity] = side == .trailing ? activities : activities.reversed()
+        let segmentWidth = frame.width / CGFloat(activities.count)
+        let segments = ordered.enumerated().map { index, activity in
+            IslandBubble.Segment(
                 activity: activity,
-                frame: CGRect(x: midX - size.width / 2, y: 0, width: size.width, height: size.height),
-                isWide: isWide
+                frame: CGRect(x: frame.minX + segmentWidth * CGFloat(index), y: 0, width: segmentWidth, height: frame.height)
             )
         }
     }
 
     /// Where the front app's menus reach, as `AppMenuExtent` measured them.
-    /// `nil` when there's no telling, which keeps bubbles off the left.
+    /// `nil` when there's no telling (Xcode won't say, for one): then
+    /// they're taken to be as long as Xcode's.
     var appMenus: AppMenuSpan?
 
     /// Judged as if the island and the bubble had both grown under the
     /// cursor, so hovering never sends a bubble to the other side.
     private func hasRoomLeftOfIsland(for bubbleWidth: CGFloat) -> Bool {
-        guard let appMenus else { return false }
+        let appMenus = appMenus ?? AppMenuSpan(trailingEdge: Self.unmeasuredMenusReach - screenWidth / 2, spillsPastCentre: false)
         let isIslandHovered = hovered != nil && hovered == primaryActivity
         let islandWidth = geometry.size.width + (isIslandHovered ? 0 : Self.hoverGrowth.width)
         let bubbleLeftEdge = -(islandWidth / 2 + Self.bubbleGap + bubbleWidth + Self.bubbleHoverGrowth + IslandShape.earWidth)
@@ -292,6 +332,7 @@ final class NotchViewModel {
 
     // MARK: - Layout constants from the design
 
+        return IslandBubble(side: side, frame: frame, segments: segments, isWide: isWideBubble(for: activities))
     /// Height of the invisible strip along the top edge that brings a
     /// tucked-away island back on screens without a notch.
     static let hoverStripHeight: CGFloat = 5
@@ -323,8 +364,22 @@ final class NotchViewModel {
     static let expandedTopGap: CGFloat = 10
     static let expandedHeaderGap: CGFloat = 12
     static let expandedControlsGap: CGFloat = 6
+    /// How far from the left edge to take menus no one could measure to
+    /// reach: Xcode's, among the longest, end at about 728pt. On a wide
+    /// external display that leaves room on the left; on a MacBook it
+    /// doesn't.
+    static let unmeasuredMenusReach: CGFloat = 740
     static let expandedBottomGap: CGFloat = 10
     /// Everything under the notch: the artwork (64), the progress row and the
+    /// Between two activities' glyphs in a shared bubble: a little more
+    /// than the route gap, so a ring round one glyph clears the other.
+    static let pairedGlyphGap: CGFloat = 10
+
+    /// Two activities' glyphs, each centred in its half.
+    static func pairedBubbleWidth(notch: CGSize) -> CGFloat {
+        let layout = CompactLayout(notch: notch)
+        return layout.verticalInset * 2 + layout.artSize * 2 + pairedGlyphGap
+    }
     /// controls (44) with their gaps. The 44pt buttons leave empty space
     /// under their glyphs, so the bottom looks roomier than its 10pt.
     static let expandedBodyHeight: CGFloat = expandedTopGap + 64 + expandedHeaderGap + PlaybackProgressView.height

@@ -127,9 +127,9 @@ struct IslandView: View {
     }
 }
 
-/// An activity waiting beside the island: the same black, hanging from the
-/// top edge the same way, with its own content centred in it. Clicking it
-/// opens that activity.
+/// Activities waiting beside the island: the same black, hanging from the
+/// top edge the same way, with each one's content centred in its share of
+/// it. Clicking one opens that activity.
 private struct IslandBubbleView: View {
     let bubble: IslandBubble
     let viewModel: NotchViewModel
@@ -148,18 +148,24 @@ private struct IslandBubbleView: View {
                 .fill(.black)
                 .frame(width: size.width + IslandShape.earWidth * 2, height: size.height)
 
-            content
-                .frame(width: size.width, height: size.height)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    viewModel.expand(bubble.activity)
+            HStack(spacing: 0) {
+                ForEach(bubble.segments, id: \.activity) { segment in
+                    content(for: segment.activity)
+                        .frame(width: size.width / CGFloat(bubble.segments.count), height: size.height)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            viewModel.expand(segment.activity)
+                        }
+                        .transition(.islandContent)
                 }
         }
     }
 
     @ViewBuilder
-    private var content: some View {
-        switch bubble.activity {
+    private func content(for activity: IslandActivity) -> some View {
+        switch activity {
+            }
+            .frame(width: size.width, height: size.height)
         case .nowPlaying:
             NowPlayingMinimalView(
                 nowPlaying: viewModel.nowPlaying,
