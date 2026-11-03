@@ -192,11 +192,16 @@ final class NotchViewModel {
         // A build goes ahead of music, as on the iPhone, where a live
         // activity you're waiting on leads. An agent waiting for your
         // answer goes ahead of everything, even over a full-screen app,
-        // since it can't go on without you. A copy comes last: it shows only
-        // where there's room, and never pushes anything aside.
+        // since it can't go on without you. A copy leads for its moment, as
+        // an alert does, but in an ordinary pill: what it displaces only
+        // moves to a bubble, so it takes no more room than a bubble of its
+        // own would, and a bubble can be hidden by the front app's menus.
         var running: [IslandActivity] = []
         if claude.needsAnswer {
             running.append(.claudeCode)
+        }
+        if isShowingAll, clipboard.shown != nil {
+            running.append(.clipboard)
         }
         if isShowingAll, xcode.build != nil {
             running.append(.xcode)
@@ -209,9 +214,6 @@ final class NotchViewModel {
         }
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
-        }
-        if isShowingAll, clipboard.shown != nil {
-            running.append(.clipboard)
         }
         if presentation == .expanded, let expandedActivity, let index = running.firstIndex(of: expandedActivity) {
             running.insert(running.remove(at: index), at: 0)

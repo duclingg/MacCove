@@ -96,6 +96,20 @@ final class ClipboardMonitor {
         UserDefaults.standard.bool(forKey: enabledKey)
     }
 
+    /// The clipboard is private. Until macOS has asked about MacCove, it
+    /// reads freely; once it has, it asks on every copy, or refuses, unless
+    /// set to Always Allow in Privacy & Security › Paste from Other Apps.
+    static var isAccessRestricted: Bool {
+        [.ask, .alwaysDeny].contains(NSPasteboard.general.accessBehavior)
+    }
+
+    static func openAccessSettings() {
+        // The pane's current identifier; the old com.apple.preference.security
+        // one no longer opens anything.
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Pasteboard") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     /// Starts watching from what's on the pasteboard now, which was copied
     /// before and isn't shown.
     func start() {
@@ -203,7 +217,9 @@ final class ClipboardMonitor {
         let pasteboard = NSPasteboard.general
         guard pasteboard.changeCount != changeCount else { return }
         changeCount = pasteboard.changeCount
-        guard pausedUntil == nil else { return }
+        // Refused, nothing would come back. Asking, reading prompts you,
+        // which is how MacCove first appears in Settings to be allowed.
+        guard pausedUntil == nil, pasteboard.accessBehavior != .alwaysDeny else { return }
 
         let types = Set(pasteboard.types ?? [])
         // Empty when something cleared it.

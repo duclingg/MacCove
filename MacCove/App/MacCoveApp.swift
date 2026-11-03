@@ -9,6 +9,9 @@ struct MacCoveApp: App {
     @State private var hasAccessibility = AppMenuExtent.isAllowed
     @AppStorage(TerminalHook.thresholdKey) private var terminalThreshold = TerminalHook.defaultThreshold
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
+    /// Copies don't show, or ask every time, once macOS restricts reading
+    /// the clipboard.
+    @State private var isClipboardRestricted = ClipboardMonitor.isAccessRestricted
 
     var body: some Scene {
         MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled") {
@@ -19,6 +22,7 @@ struct MacCoveApp: App {
             .onAppear {
                 launchAtLogin.refresh()
                 hasAccessibility = AppMenuExtent.isAllowed
+                isClipboardRestricted = ClipboardMonitor.isAccessRestricted
             }
             Button("Set Up Xcode Builds…") {
                 XcodeBehaviorScripts.showSetup()
@@ -56,6 +60,11 @@ struct MacCoveApp: App {
                 }
             ))
             if isClipboardEnabled {
+                if isClipboardRestricted {
+                    Button("Allow Clipboard Access…") {
+                        ClipboardMonitor.openAccessSettings()
+                    }
+                }
                 Button("Show Clipboard History") {
                     appDelegate.showClipboardHistory()
                 }
