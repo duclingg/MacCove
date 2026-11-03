@@ -87,6 +87,9 @@ struct IslandView: View {
                 case .xcode?:
                     XcodeCompactView(xcode: viewModel.xcode, notchSize: notch)
                         .transition(.islandContent)
+                case .terminal?:
+                    TerminalCompactView(terminal: viewModel.terminal, notchSize: notch)
+                        .transition(.islandContent)
                 case .nowPlaying?:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
@@ -98,8 +101,8 @@ struct IslandView: View {
                     EmptyView()
                 }
             case .expanded:
-                // Sign-in never opens, so anything but the player or a build
-                // here is the battery's.
+                // Sign-in never opens, so anything but the player, a build or
+                // a command here is the battery's.
                 switch viewModel.primaryActivity {
                 case .nowPlaying?:
                     NowPlayingExpandedView(
@@ -111,6 +114,9 @@ struct IslandView: View {
                     .transition(.islandContent)
                 case .xcode?:
                     XcodeExpandedView(xcode: viewModel.xcode, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case .terminal?:
+                    TerminalExpandedView(terminal: viewModel.terminal, notchHeight: notch.height)
                         .transition(.islandContent)
                 default:
                     BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
@@ -162,6 +168,8 @@ private struct IslandBubbleView: View {
             )
         case .xcode:
             XcodeMinimalView(xcode: viewModel.xcode, notchSize: viewModel.notchSize)
+        case .terminal:
+            TerminalMinimalView(terminal: viewModel.terminal, notchSize: viewModel.notchSize)
         case .signIn, .charging, .lowBattery:
             // A prompt always leads, and a battery alert shows alone.
             EmptyView()

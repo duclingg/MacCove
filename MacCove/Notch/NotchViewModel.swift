@@ -19,8 +19,10 @@ enum IslandActivity: Hashable {
     case lowBattery
     /// "Charging" beside the notch while the battery fills up.
     case charging
-    /// An Xcode build: building, then failed or succeeded.
+    /// An Xcode build, test run or run of the app.
     case xcode
+    /// A terminal command that's taking a while, then how it ended.
+    case terminal
     case nowPlaying
 
     /// How long a battery alert stays; the others leave by themselves.
@@ -28,7 +30,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .nowPlaying: .zero
         }
     }
 }
@@ -60,6 +62,7 @@ final class NotchViewModel {
     let battery: BatteryMonitor
     let signIn: SignInMonitor
     let xcode: XcodeBuildMonitor
+    let terminal: TerminalCommandMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
@@ -85,21 +88,23 @@ final class NotchViewModel {
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
     @ObservationIgnored private var alertTask: Task<Void, Never>?
-    /// Closes a failed build that opened by itself.
-    @ObservationIgnored private var xcodeTask: Task<Void, Never>?
+    /// Closes a failure that opened by itself.
+    @ObservationIgnored private var failureCollapseTask: Task<Void, Never>?
 
     init(
         nowPlaying: NowPlayingModel,
         audioRoute: AudioRouteMonitor,
         battery: BatteryMonitor,
         signIn: SignInMonitor,
-        xcode: XcodeBuildMonitor
+        xcode: XcodeBuildMonitor,
+        terminal: TerminalCommandMonitor
     ) {
         self.nowPlaying = nowPlaying
         self.audioRoute = audioRoute
         self.battery = battery
         self.signIn = signIn
         self.xcode = xcode
+        self.terminal = terminal
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
             self?.playbackChanged(playing: playing)
@@ -112,6 +117,9 @@ final class NotchViewModel {
         }
         xcode.onEvent = { [weak self] event in
             self?.xcodeEvent(event)
+        }
+        terminal.onEvent = { [weak self] event in
+            self?.terminalEvent(event)
         }
     }
 
@@ -136,6 +144,9 @@ final class NotchViewModel {
         var running: [IslandActivity] = []
         if isShowingAll, xcode.build != nil {
             running.append(.xcode)
+        }
+        if isShowingAll, terminal.command != nil {
+            running.append(.terminal)
         }
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
@@ -213,6 +224,7 @@ final class NotchViewModel {
             let width = switch primary {
             case .charging?: Self.chargingWidth(notch: notch)
             case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
+            case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
             default: Self.compactWidth(notch: notch)
             }
             return IslandGeometry(
@@ -224,6 +236,7 @@ final class NotchViewModel {
             let body = switch primary {
             case .nowPlaying?: Self.expandedBodyHeight
             case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
+            case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
             default: BatteryExpandedView.bodyHeight
             }
             return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
@@ -338,9 +351,9 @@ final class NotchViewModel {
         // An alert stays while the cursor is on it, then leaves shortly after.
         if isHovering {
             alertTask?.cancel()
-            // A failed build that opened by itself stays open while the
-            // cursor is on it, then closes like anything else.
-            xcodeTask?.cancel()
+            // A failure that opened by itself stays open while the cursor
+            // is on it, then closes like anything else.
+            failureCollapseTask?.cancel()
         } else if presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
         }
@@ -426,50 +439,68 @@ final class NotchViewModel {
         }
     }
 
-    /// A failed build opens by itself with its first errors, unless another
-    /// activity is open or the island is keeping out of the way. Either
-    /// result stays, as the pill once closed, until it's dismissed or the
-    /// next build starts.
+    /// A failed build, test run or crash opens by itself. Every result
+    /// stays, as the pill once closed, until it's dismissed or the next
+    /// build starts.
     private func xcodeEvent(_ event: XcodeBuildMonitor.Event) {
-        xcodeTask?.cancel()
         switch event {
-        case .started:
-            // A failed build left open gives way to the next one.
-            if presentation == .expanded, expandedActivity == .xcode, !isHovering {
-                presentation = .compact
-            }
-        case .failed:
-            let isShowingAll = !isFullScreenActive || isRevealedByHover
-            let isOtherOpen = presentation == .expanded && expandedActivity != .xcode
-            guard !isSigningIn, batteryAlert == nil, isShowingAll, !isOtherOpen else { return }
-            collapseTask?.cancel()
-            expandedActivity = .xcode
-            presentation = .expanded
-            scheduleXcodeCollapse()
-        case .succeeded:
-            break
-        case .ended:
-            // Dismissed from its own buttons: nothing is left to keep open.
-            if expandedActivity == .xcode {
-                collapseTask?.cancel()
-                presentation = .compact
-                expandedActivity = nil
-            }
+        case .started: activityStarted(.xcode)
+        case .failed: activityFailed(.xcode)
+        case .succeeded: break
+        case .ended: activityEnded(.xcode)
         }
     }
 
-    /// How long a failed build stays open by itself before shrinking to its
-    /// error count.
-    private static let xcodeFailedOpenDuration: Duration = .seconds(8)
+    /// A failed command opens by itself, as a build does.
+    private func terminalEvent(_ event: TerminalCommandMonitor.Event) {
+        switch event {
+        case .started: activityStarted(.terminal)
+        case .failed: activityFailed(.terminal)
+        case .finished: break
+        case .ended: activityEnded(.terminal)
+        }
+    }
 
-    private func scheduleXcodeCollapse() {
-        xcodeTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.xcodeFailedOpenDuration)
+    /// A failure left open gives way to whatever its activity starts next,
+    /// unless the cursor is on it.
+    private func activityStarted(_ activity: IslandActivity) {
+        guard expandedActivity == activity else { return }
+        failureCollapseTask?.cancel()
+        if presentation == .expanded, !isHovering {
+            presentation = .compact
+        }
+    }
+
+    /// Opens by itself, unless another activity is open or the island is
+    /// keeping out of the way, then shrinks back to the pill after a while
+    /// if the cursor never comes.
+    private func activityFailed(_ activity: IslandActivity) {
+        let isShowingAll = !isFullScreenActive || isRevealedByHover
+        let isOtherOpen = presentation == .expanded && expandedActivity != activity
+        guard !isSigningIn, batteryAlert == nil, isShowingAll, !isOtherOpen else { return }
+        collapseTask?.cancel()
+        failureCollapseTask?.cancel()
+        expandedActivity = activity
+        presentation = .expanded
+        failureCollapseTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.failureOpenDuration)
             guard !Task.isCancelled, let self, !self.isHovering,
-                  self.presentation == .expanded, self.expandedActivity == .xcode else { return }
+                  self.presentation == .expanded, self.expandedActivity == activity else { return }
             self.presentation = .compact
         }
     }
+
+    /// Dismissed from its own buttons: nothing is left to keep open.
+    private func activityEnded(_ activity: IslandActivity) {
+        guard expandedActivity == activity else { return }
+        failureCollapseTask?.cancel()
+        collapseTask?.cancel()
+        presentation = .compact
+        expandedActivity = nil
+    }
+
+    /// How long a failure stays open by itself before shrinking to the pill.
+    private static let failureOpenDuration: Duration = .seconds(8)
 
     /// A short grace period, so a quick pause-and-resume doesn't make the
     /// island flicker away and back.
