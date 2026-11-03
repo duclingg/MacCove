@@ -60,3 +60,12 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# macOS
+.DS_Store
+
+# Keep the Xcode project tracked (overrides global ignore)
+!project.pbxproj
+!contents.xcworkspacedata
+!Package.resolved
+!Configuration/Info.plist
