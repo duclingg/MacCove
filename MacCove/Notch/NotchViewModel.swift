@@ -25,6 +25,8 @@ enum IslandActivity: Hashable {
     case terminal
     /// A Claude Code session: working, waiting for approval, finished.
     case claudeCode
+    /// "Copied" for a moment, or the last few copies.
+    case clipboard
     case nowPlaying
 
     /// How long a battery alert stays; the others leave by themselves.
@@ -32,7 +34,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .clipboard, .nowPlaying: .zero
         }
     }
 }
@@ -84,6 +86,7 @@ final class NotchViewModel {
     let xcode: XcodeBuildMonitor
     let terminal: TerminalCommandMonitor
     let claude: ClaudeCodeMonitor
+    let clipboard: ClipboardMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
@@ -111,7 +114,8 @@ final class NotchViewModel {
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
     @ObservationIgnored private var alertTask: Task<Void, Never>?
-    /// Closes a failure that opened by itself.
+    /// Closes a failure, or the clipboard history from the menu bar, that
+    /// opened by itself.
     @ObservationIgnored private var failureCollapseTask: Task<Void, Never>?
 
     init(
@@ -121,7 +125,8 @@ final class NotchViewModel {
         signIn: SignInMonitor,
         xcode: XcodeBuildMonitor,
         terminal: TerminalCommandMonitor,
-        claude: ClaudeCodeMonitor
+        claude: ClaudeCodeMonitor,
+        clipboard: ClipboardMonitor
     ) {
         self.nowPlaying = nowPlaying
         self.audioRoute = audioRoute
@@ -130,6 +135,7 @@ final class NotchViewModel {
         self.xcode = xcode
         self.terminal = terminal
         self.claude = claude
+        self.clipboard = clipboard
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
             self?.playbackChanged(playing: playing)
@@ -153,6 +159,15 @@ final class NotchViewModel {
         claude.onEvent = { [weak self] event in
             self?.claudeEvent(event)
         }
+        clipboard.onEvent = { [weak self] event in
+            self?.clipboardEvent(event)
+        }
+        // Only the clipboard's own pill or details: a copy made while you're
+        // using the player doesn't wait for you to finish with it.
+        clipboard.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.hovered == .clipboard || (self.presentation == .expanded && self.expandedActivity == .clipboard)
+        }
     }
 
     /// Most that run at once: one in the island and two in bubbles.
@@ -174,10 +189,14 @@ final class NotchViewModel {
         // A build goes ahead of music, as on the iPhone, where a live
         // activity you're waiting on leads. An agent waiting for your
         // answer goes ahead of everything, even over a full-screen app,
-        // since it can't go on without you.
+        // since it can't go on without you. A copy leads for its moment,
+        // like an alert, but leaves the rest beside it.
         var running: [IslandActivity] = []
         if claude.needsAnswer {
             running.append(.claudeCode)
+        }
+        if isShowingAll, clipboard.shown != nil {
+            running.append(.clipboard)
         }
         if isShowingAll, xcode.build != nil {
             running.append(.xcode)
@@ -266,6 +285,7 @@ final class NotchViewModel {
             case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
             case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
             case .claudeCode?: Self.compactWidth(notch: notch)
+            case .clipboard?: ClipboardCompactView.width(for: clipboard.shown, notch: notch)
             default: Self.compactWidth(notch: notch)
             }
             return IslandGeometry(
@@ -279,6 +299,7 @@ final class NotchViewModel {
             case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
             case .claudeCode?: ClaudeCodeExpandedView.bodyHeight(for: claude.session)
+            case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
             default: BatteryExpandedView.bodyHeight
             }
             return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
@@ -460,6 +481,7 @@ final class NotchViewModel {
         } else if presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
             terminal.leaveIfDue(after: .seconds(1.2))
+            clipboard.leaveIfDue(after: .seconds(1.2))
         }
     }
 
@@ -577,6 +599,33 @@ final class NotchViewModel {
         }
     }
 
+    /// A new copy closes the history, unless the cursor is on it.
+    private func clipboardEvent(_ event: ClipboardMonitor.Event) {
+        switch event {
+        case .copied: activityStarted(.clipboard)
+        case .ended: activityEnded(.clipboard)
+        }
+    }
+
+    /// From the menu bar: opens the history over whatever else is open,
+    /// then shrinks back to the pill after a while if the cursor never
+    /// comes, and leaves.
+    func showClipboardHistory() {
+        guard !isSigningIn, batteryAlert == nil else { return }
+        clipboard.showHistory()
+        collapseTask?.cancel()
+        failureCollapseTask?.cancel()
+        expandedActivity = .clipboard
+        presentation = .expanded
+        failureCollapseTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.failureOpenDuration)
+            guard !Task.isCancelled, let self, !self.isHovering,
+                  self.presentation == .expanded, self.expandedActivity == .clipboard else { return }
+            self.presentation = .compact
+            self.clipboard.leaveIfDue(after: .seconds(1.2))
+        }
+    }
+
     /// Takes over the island, over anything else open, as an incoming call
     /// does on the iPhone. Only the lock screen and a battery alert come
     /// first.
@@ -668,6 +717,7 @@ final class NotchViewModel {
             self.isRevealedByHover = false
             self.scheduleAlertDismissal(after: .seconds(1.2))
             self.terminal.leaveIfDue(after: .seconds(1.2))
+            self.clipboard.leaveIfDue(after: .seconds(1.2))
         }
     }
 }

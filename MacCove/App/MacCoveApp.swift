@@ -8,6 +8,7 @@ struct MacCoveApp: App {
     /// only with Accessibility access.
     @State private var hasAccessibility = AppMenuExtent.isAllowed
     @AppStorage(TerminalHook.thresholdKey) private var terminalThreshold = TerminalHook.defaultThreshold
+    @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
 
     var body: some Scene {
         MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled") {
@@ -45,6 +46,21 @@ struct MacCoveApp: App {
                 }
             }
             Divider()
+            // Off until asked for: copies are kept 24 hours, on this Mac
+            // only, and passwords never.
+            Toggle("Clipboard History", isOn: Binding(
+                get: { isClipboardEnabled },
+                set: { enabled in
+                    isClipboardEnabled = enabled
+                    appDelegate.setClipboardEnabled(enabled)
+                }
+            ))
+            if isClipboardEnabled {
+                Button("Show Clipboard History") {
+                    appDelegate.showClipboardHistory()
+                }
+            }
+            Divider()
             Button("Quit MacCove") {
                 NSApp.terminate(nil)
             }
@@ -55,8 +71,10 @@ struct MacCoveApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
+    private var viewModel: NotchViewModel?
     private var xcode: XcodeBuildMonitor?
     private var terminal: TerminalCommandMonitor?
+    private var clipboard: ClipboardMonitor?
     private var agentBridge: AgentBridge?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -70,22 +88,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let xcode = XcodeBuildMonitor()
         let terminal = TerminalCommandMonitor()
         let claude = ClaudeCodeMonitor()
+        let clipboard = ClipboardMonitor()
         self.xcode = xcode
         self.terminal = terminal
-        notchController = NotchWindowController(
-            viewModel: NotchViewModel(
-                nowPlaying: nowPlaying,
-                audioRoute: audioRoute,
-                battery: battery,
-                signIn: signIn,
-                xcode: xcode,
-                terminal: terminal,
-                claude: claude
-            )
+        self.clipboard = clipboard
+        let viewModel = NotchViewModel(
+            nowPlaying: nowPlaying,
+            audioRoute: audioRoute,
+            battery: battery,
+            signIn: signIn,
+            xcode: xcode,
+            terminal: terminal,
+            claude: claude,
+            clipboard: clipboard
         )
+        self.viewModel = viewModel
+        notchController = NotchWindowController(viewModel: viewModel)
         nowPlaying.start()
         battery.start()
         signIn.start()
+        if ClipboardMonitor.isEnabled {
+            clipboard.start()
+        }
 
         // Hook events from Claude Code, by the agent they're for.
         let bridge = AgentBridge { [weak claude] request in
@@ -108,6 +132,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forEventClass: AEEventClass(kInternetEventClass),
             andEventID: AEEventID(kAEGetURL)
         )
+    }
+
+    func setClipboardEnabled(_ enabled: Bool) {
+        if enabled {
+            clipboard?.start()
+        } else {
+            clipboard?.stop()
+        }
+    }
+
+    func showClipboardHistory() {
+        viewModel?.showClipboardHistory()
     }
 
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, replyEvent: NSAppleEventDescriptor) {

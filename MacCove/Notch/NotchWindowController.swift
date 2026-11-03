@@ -6,8 +6,9 @@ import SwiftUI
 /// whether the panel should receive the mouse based on where the cursor is
 /// relative to the island. Lives for the lifetime of the app.
 final class NotchWindowController {
-    /// Room for the largest island state plus its shadow.
-    private static let canvasSize = CGSize(width: 640, height: 300)
+    /// Room for the largest island state plus its shadow: the clipboard
+    /// history, at about 345pt.
+    private static let canvasSize = CGSize(width: 640, height: 420)
 
     private let panel = NotchPanel()
     /// A copy of the island above the lock screen, there only while locked.

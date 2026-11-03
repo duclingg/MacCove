@@ -93,6 +93,9 @@ struct IslandView: View {
                 case .claudeCode?:
                     ClaudeCodeCompactView(claude: viewModel.claude, notchSize: notch)
                         .transition(.islandContent)
+                case .clipboard?:
+                    ClipboardCompactView(clipboard: viewModel.clipboard, notchSize: notch)
+                        .transition(.islandContent)
                 case .nowPlaying?:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
@@ -105,7 +108,7 @@ struct IslandView: View {
                 }
             case .expanded:
                 // Sign-in never opens, so anything but the player, a build, a
-                // command or an agent here is the battery's.
+                // command, an agent or the clipboard here is the battery's.
                 switch viewModel.primaryActivity {
                 case .nowPlaying?:
                     NowPlayingExpandedView(
@@ -123,6 +126,9 @@ struct IslandView: View {
                         .transition(.islandContent)
                 case .claudeCode?:
                     ClaudeCodeExpandedView(claude: viewModel.claude, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case .clipboard?:
+                    ClipboardExpandedView(clipboard: viewModel.clipboard, notchHeight: notch.height)
                         .transition(.islandContent)
                 default:
                     BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
@@ -184,6 +190,8 @@ private struct IslandBubbleView: View {
             TerminalMinimalView(terminal: viewModel.terminal, notchSize: viewModel.notchSize)
         case .claudeCode:
             ClaudeCodeMinimalView(claude: viewModel.claude, notchSize: viewModel.notchSize)
+        case .clipboard:
+            ClipboardMinimalView(notchSize: viewModel.notchSize)
         case .signIn, .charging, .lowBattery:
             // A prompt always leads, and a battery alert shows alone.
             EmptyView()
