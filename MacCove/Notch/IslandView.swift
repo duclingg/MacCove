@@ -84,6 +84,9 @@ struct IslandView: View {
                 case .signIn?:
                     SignInCompactView(signIn: viewModel.signIn, notchSize: notch)
                         .transition(.islandContent)
+                case .xcode?:
+                    XcodeCompactView(xcode: viewModel.xcode, notchSize: notch)
+                        .transition(.islandContent)
                 case .nowPlaying?:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
@@ -95,9 +98,10 @@ struct IslandView: View {
                     EmptyView()
                 }
             case .expanded:
-                // Sign-in never opens, so anything but the player here is
-                // the battery's.
-                if viewModel.primaryActivity == .nowPlaying {
+                // Sign-in never opens, so anything but the player or a build
+                // here is the battery's.
+                switch viewModel.primaryActivity {
+                case .nowPlaying?:
                     NowPlayingExpandedView(
                         nowPlaying: nowPlaying,
                         notchHeight: notch.height,
@@ -105,7 +109,10 @@ struct IslandView: View {
                         sourceName: viewModel.audioRoute.sourceName
                     )
                     .transition(.islandContent)
-                } else {
+                case .xcode?:
+                    XcodeExpandedView(xcode: viewModel.xcode, notchHeight: notch.height)
+                        .transition(.islandContent)
+                default:
                     BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
                         .transition(.islandContent)
                 }
@@ -148,7 +155,13 @@ private struct IslandBubbleView: View {
     private var content: some View {
         switch bubble.activity {
         case .nowPlaying:
-            NowPlayingMinimalView(nowPlaying: viewModel.nowPlaying, notchSize: viewModel.notchSize)
+            NowPlayingMinimalView(
+                nowPlaying: viewModel.nowPlaying,
+                notchSize: viewModel.notchSize,
+                routeSystemImage: bubble.isWide ? viewModel.audioRoute.route?.systemImage : nil
+            )
+        case .xcode:
+            XcodeMinimalView(xcode: viewModel.xcode, notchSize: viewModel.notchSize)
         case .signIn, .charging, .lowBattery:
             // A prompt always leads, and a battery alert shows alone.
             EmptyView()

@@ -12,6 +12,9 @@ struct MacCoveApp: App {
                 set: { launchAtLogin.setEnabled($0) }
             ))
             .onAppear { launchAtLogin.refresh() }
+            Button("Set Up Xcode Builds…") {
+                XcodeBehaviorScripts.showSetup()
+            }
             Divider()
             Button("Quit MacCove") {
                 NSApp.terminate(nil)
@@ -23,6 +26,7 @@ struct MacCoveApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
+    private var xcode: XcodeBuildMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let music = MusicScripting()
@@ -32,11 +36,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let battery = BatteryMonitor()
         let signIn = SignInMonitor()
+        let xcode = XcodeBuildMonitor()
+        self.xcode = xcode
         notchController = NotchWindowController(
-            viewModel: NotchViewModel(nowPlaying: nowPlaying, audioRoute: audioRoute, battery: battery, signIn: signIn)
+            viewModel: NotchViewModel(nowPlaying: nowPlaying, audioRoute: audioRoute, battery: battery, signIn: signIn, xcode: xcode)
         )
         nowPlaying.start()
         battery.start()
         signIn.start()
+
+        // maccove:// URLs, from the scripts Xcode's Behaviors run. Handled
+        // here rather than through SwiftUI, which has no window to give them.
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleURLEvent(_:replyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, replyEvent: NSAppleEventDescriptor) {
+        guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let url = URL(string: string) else { return }
+        xcode?.handle(url)
     }
 }
