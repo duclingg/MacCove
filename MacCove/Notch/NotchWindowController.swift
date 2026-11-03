@@ -21,6 +21,12 @@ final class NotchWindowController {
     private var screenObserver: NSObjectProtocol?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var fullScreenCheck: Task<Void, Never>?
+    private var menuMeasurement: Task<Void, Never>?
+    private var activityCount = 0
+
+    /// Accessibility is asked for once, the first time a bubble needs a
+    /// place; after that it's up to System Settings.
+    private static let askedForAccessibilityKey = "AskedForMenuBarAccessibility"
 
     init(viewModel: NotchViewModel) {
         self.viewModel = viewModel
@@ -54,14 +60,18 @@ final class NotchWindowController {
         }
 
         // Going in and out of full screen switches Spaces; switching apps can
-        // bring a full-screen one to the front.
+        // bring a full-screen one to the front, and brings its own menus.
         let workspace = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
             workspaceObservers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.scheduleFullScreenCheck() }
+                MainActor.assumeIsolated {
+                    self?.scheduleFullScreenCheck()
+                    self?.measureAppMenus()
+                }
             })
         }
         scheduleFullScreenCheck()
+        observeActivityCount()
 
         // Posted by loginwindow to every app as the screen locks and unlocks.
         let distributed = DistributedNotificationCenter.default()
@@ -105,6 +115,47 @@ final class NotchWindowController {
             try? await Task.sleep(for: .milliseconds(800))
             guard !Task.isCancelled else { return }
             self?.checkFullScreen()
+        }
+    }
+
+    /// Bubbles have arrived, or gone.
+    private func observeActivityCount() {
+        let count = withObservationTracking {
+            viewModel.activities.count
+        } onChange: {
+            Task { @MainActor [weak self] in self?.observeActivityCount() }
+        }
+        guard count != activityCount else { return }
+        activityCount = count
+        measureAppMenus()
+    }
+
+    /// Where the front app's menus reach, so bubbles stay clear of them.
+    /// Only needed once there are bubbles, and only then is Accessibility
+    /// asked for.
+    private func measureAppMenus() {
+        menuMeasurement?.cancel()
+        guard let screen, viewModel.activities.count > 1 else { return }
+        guard AppMenuExtent.isAllowed else {
+            viewModel.appMenus = nil
+            if !UserDefaults.standard.bool(forKey: Self.askedForAccessibilityKey) {
+                UserDefaults.standard.set(true, forKey: Self.askedForAccessibilityKey)
+                AppMenuExtent.requestPermission()
+            }
+            return
+        }
+        // MacCove itself is in front while its menu is open; its menus are
+        // gone again once it closes, so keep what was known.
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+
+        let pid = app.processIdentifier
+        let frame = screen.frame
+        let menuBarHeight = max(screen.safeAreaInsets.top, NSStatusBar.system.thickness)
+        menuMeasurement = Task { [weak self] in
+            let span = await AppMenuExtent.span(of: pid, mainDisplayFrame: frame, menuBarHeight: menuBarHeight)
+            guard !Task.isCancelled, let self else { return }
+            self.viewModel.appMenus = span
         }
     }
 
