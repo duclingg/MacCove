@@ -12,12 +12,14 @@ extension ShapeStyle where Self == Color {
     }
 }
 
-/// Album art that blurs into the next track's cover.
+/// Album art that flips over like a card, around its vertical axis, and
+/// blurs into the next track's cover, as on the iPhone's Dynamic Island.
 ///
 /// A new track's art usually arrives a moment after its title, and the
-/// model has no art in between. The old cover stays up through that gap,
-/// so the app's icon never flashes between two covers; it only shows once
-/// a track has turned out to have no art at all.
+/// model has no art in between. The old cover stays up through that gap and
+/// only flips once the new one is ready, so the flip never lands on the
+/// app's icon; that only shows once a track has turned out to have no art
+/// at all.
 struct ArtworkView: View {
     let image: NSImage?
     let size: CGFloat
@@ -26,11 +28,15 @@ struct ArtworkView: View {
     /// app's icon, as on the iPhone.
     var fallbackIcon: NSImage?
 
-    /// What's drawn, which lags `image` while new art is on its way.
+    /// What's drawn, which lags `image` while new art is on its way and
+    /// while the old art turns away.
     @State private var displayedImage: NSImage?
-    /// Changes with each new cover, so the old one blurs out as the new one
-    /// blurs in.
-    @State private var version = 0
+    /// The art to turn to. Kept up to date mid-flip, in case a newer cover
+    /// arrives while the old one is turning away.
+    @State private var pendingImage: NSImage?
+    /// Bumped for each new cover, which starts a flip.
+    @State private var flips = 0
+    @State private var swapTask: Task<Void, Never>?
     @State private var fallbackTask: Task<Void, Never>?
 
     /// How long the old cover waits for the next one before giving way to
@@ -46,29 +52,46 @@ struct ArtworkView: View {
     }
 
     var body: some View {
-        ZStack {
-            artwork
-                .id(version)
-                .transition(.blurReplace)
-        }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .onChange(of: image) { _, newImage in
-            fallbackTask?.cancel()
-            guard newImage == nil, displayedImage != nil else {
-                show(newImage)
-                return
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let peakBlur = size * 0.12
+
+        artwork
+            // Turn the old art edge-on as it blurs, jump to the far side,
+            // then turn the new art face-on, coming into focus, with a
+            // little settle.
+            .keyframeAnimator(initialValue: FlipFrame(), trigger: flips) { content, frame in
+                content
+                    .blur(radius: frame.blur)
+                    .clipShape(shape)
+                    .rotation3DEffect(.degrees(frame.angle), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
+            } keyframes: { _ in
+                KeyframeTrack(\.angle) {
+                    CubicKeyframe(90, duration: Self.halfFlip)
+                    MoveKeyframe(-90)
+                    SpringKeyframe(0, duration: 0.34, spring: .bouncy)
+                }
+                KeyframeTrack(\.blur) {
+                    CubicKeyframe(peakBlur, duration: Self.halfFlip)
+                    CubicKeyframe(0, duration: 0.3)
+                }
             }
-            fallbackTask = Task {
-                try? await Task.sleep(for: Self.artworkGrace)
-                guard !Task.isCancelled, image == nil else { return }
-                show(nil)
+            .frame(width: size, height: size)
+            .onChange(of: image) { _, newImage in
+                fallbackTask?.cancel()
+                guard newImage == nil, displayedImage != nil else {
+                    show(newImage)
+                    return
+                }
+                fallbackTask = Task {
+                    try? await Task.sleep(for: Self.artworkGrace)
+                    guard !Task.isCancelled, image == nil else { return }
+                    show(nil)
+                }
             }
-        }
-        .onDisappear {
-            fallbackTask?.cancel()
-        }
-        .accessibilityHidden(true)
+            .onDisappear {
+                fallbackTask?.cancel()
+            }
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -96,13 +119,26 @@ struct ArtworkView: View {
         }
     }
 
+    /// Swaps the art while it's edge-on, so the new art only appears on
+    /// the far side of the flip.
     private func show(_ newImage: NSImage?) {
-        guard newImage !== displayedImage else { return }
-        withAnimation(.easeInOut(duration: 0.4)) {
-            displayedImage = newImage
-            version += 1
+        pendingImage = newImage
+        guard swapTask == nil, newImage !== displayedImage else { return }
+        flips += 1
+        swapTask = Task {
+            try? await Task.sleep(for: .seconds(Self.halfFlip))
+            displayedImage = pendingImage
+            swapTask = nil
         }
     }
+
+    nonisolated private static let halfFlip = 0.18
+}
+
+/// Where a flip of `ArtworkView` is up to.
+private struct FlipFrame {
+    var angle: Double = 0
+    var blur: CGFloat = 0
 }
 
 /// Four-bar level meter that dances while audio plays and rests flat when paused.
