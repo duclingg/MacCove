@@ -16,8 +16,8 @@ enum IslandAlert: Equatable {
     case charging
     /// The level and a button for Low Power Mode, or its confirmation.
     case lowBattery
-    /// A Touch ID or password prompt. Stays for as long as the prompt does,
-    /// and ahead of the battery alerts.
+    /// A Touch ID prompt or the lock screen. Stays for as long as it does,
+    /// ahead of the battery alerts, and only ever as the pill.
     case signIn
 
     /// How long a battery alert stays; a sign-in leaves with its prompt.
@@ -84,11 +84,12 @@ final class NotchViewModel {
 
     var state: IslandState {
         guard nowPlaying.hasMedia || alert != nil else { return .idle }
-        // Brought back on purpose: shown whatever else is going on.
-        if isRevealedByHover { return presentation }
         // A prompt answers something you just did, so it shows in full
         // screen too.
-        if isFullScreenActive, alert != .signIn { return .idle }
+        if alert == .signIn { return .compact }
+        // Brought back on purpose: shown whatever else is going on.
+        if isRevealedByHover { return presentation }
+        if isFullScreenActive { return .idle }
         if alert == nil, presentation == .compact, isDismissedForPause { return .idle }
         return presentation
     }
@@ -122,15 +123,9 @@ final class NotchViewModel {
         case .compact where alert == .signIn:
             let grow: CGSize = isHovering ? CGSize(width: 8, height: 3) : .zero
             return IslandGeometry(
-                size: CGSize(width: Self.signInWidth(notch: notch, prompt: signIn.prompt) + grow.width, height: notch.height + grow.height),
+                size: CGSize(width: Self.signInWidth(notch: notch) + grow.width, height: notch.height + grow.height),
                 cornerRadius: Self.compactCornerRadius,
                 isLifted: false
-            )
-        case .expanded where alert == .signIn:
-            return IslandGeometry(
-                size: CGSize(width: SignInExpandedView.width, height: notch.height + SignInExpandedView.bodyHeight),
-                cornerRadius: SignInExpandedView.cornerRadius,
-                isLifted: true
             )
         case .compact where alert == .lowBattery:
             return IslandGeometry(
@@ -192,23 +187,17 @@ final class NotchViewModel {
     }
 
     /// Each wing of the sign-in pill: the lock on the left and the
-    /// fingerprint or check on the right, or, while typing, room for six
-    /// dots or "Password".
+    /// fingerprint or check on the right.
     static let signInWingWidth: CGFloat = 56
-    static let passwordWingWidth: CGFloat = 77
 
-    static func signInWidth(notch: CGSize, prompt: SignInMonitor.Prompt?) -> CGFloat {
-        if case .password? = prompt {
-            return notch.width + passwordWingWidth * 2
-        }
-        return notch.width + signInWingWidth * 2
+    static func signInWidth(notch: CGSize) -> CGFloat {
+        notch.width + signInWingWidth * 2
     }
 
     // MARK: - Interaction
 
     func expand() {
-        // Nothing opens on the lock screen, where it would cover the clock.
-        guard !signIn.isScreenLocked else { return }
+        guard alert != .signIn else { return }
         collapseTask?.cancel()
         alertTask?.cancel()
         presentation = .expanded
@@ -258,9 +247,7 @@ final class NotchViewModel {
         }
     }
 
-    /// Takes over the island as the prompt appears, and leaves with it. It
-    /// opens into the square only when clicked, and never on the lock
-    /// screen, where the square would cover the clock.
+    /// Takes over the island as the prompt appears, and leaves with it.
     private func signInChanged(_ prompt: SignInMonitor.Prompt?) {
         guard prompt != nil else {
             guard alert == .signIn else { return }
@@ -275,10 +262,6 @@ final class NotchViewModel {
             collapseTask?.cancel()
             alertTask?.cancel()
             alert = .signIn
-            presentation = .compact
-        }
-        if signIn.isScreenLocked {
-            collapseTask?.cancel()
             presentation = .compact
         }
     }

@@ -9,6 +9,12 @@ final class NotchWindowController {
     private static let canvasSize = CGSize(width: 640, height: 300)
 
     private let panel = NotchPanel()
+    /// A copy of the island above the lock screen, there only while locked.
+    /// It's display only: the lock screen's space doesn't pass on clicks, so
+    /// the panel you click never goes in it.
+    private var lockScreenPanel: NotchPanel?
+    private var lockScreenPanelRemoval: Task<Void, Never>?
+    private var lockObservers: [NSObjectProtocol] = []
     private let viewModel: NotchViewModel
     private var screen: NSScreen?
     private var eventMonitors: [Any] = []
@@ -25,7 +31,6 @@ final class NotchWindowController {
 
         reposition()
         panel.orderFrontRegardless()
-        LockScreenSpace.move(panel)
 
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -57,6 +62,38 @@ final class NotchWindowController {
             })
         }
         scheduleFullScreenCheck()
+
+        // Posted by loginwindow to every app as the screen locks and unlocks.
+        let distributed = DistributedNotificationCenter.default()
+        for (name, locked) in [("com.apple.screenIsLocked", true), ("com.apple.screenIsUnlocked", false)] {
+            lockObservers.append(distributed.addObserver(forName: .init(name), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.screenLockChanged(locked: locked) }
+            })
+        }
+    }
+
+    private func screenLockChanged(locked: Bool) {
+        lockScreenPanelRemoval?.cancel()
+        guard locked else {
+            // Stays until the lock screen has faded away, so the unlock plays
+            // on without a gap; the panel underneath shows the same island.
+            lockScreenPanelRemoval = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self else { return }
+                self.lockScreenPanel?.orderOut(nil)
+                self.lockScreenPanel = nil
+            }
+            return
+        }
+        guard lockScreenPanel == nil else { return }
+        let lockPanel = NotchPanel()
+        let hostingView = NotchHostingView(rootView: IslandView(viewModel: viewModel))
+        hostingView.sizingOptions = []
+        lockPanel.contentView = hostingView
+        lockPanel.setFrame(panel.frame, display: true)
+        lockPanel.orderFrontRegardless()
+        LockScreenSpace.move(lockPanel)
+        lockScreenPanel = lockPanel
     }
 
     /// Checks now, and again once the full-screen animation has had time to

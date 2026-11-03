@@ -10,14 +10,13 @@ extension Animation {
     static let unlock = Animation.spring(duration: 0.4, bounce: 0.35)
 }
 
-/// What the prompt views draw. A beat behind the monitor when Touch ID
-/// unlocks, so the fingerprint can fill in before the label changes; the
-/// lock opens straight away.
+/// What the pill draws. A beat behind the monitor when Touch ID unlocks,
+/// so the fingerprint can fill in before the check takes over; the lock
+/// opens straight away.
 enum SignInDisplay: Equatable {
     case touchID
-    /// Unlocked with Touch ID: the ridges filling in.
+    /// Unlocked: the ridges filling in.
     case filling
-    case password(length: Int)
     case unlocked
 
     /// Unlocked, or filling in on the way there.
@@ -26,9 +25,8 @@ enum SignInDisplay: Equatable {
     }
 }
 
-/// Follows the monitor into a `SignInDisplay`. After a password there's no
-/// fingerprint to fill, so the check comes straight away. Once the prompt
-/// is gone the last look stays, for the island to fade out.
+/// Follows the monitor into a `SignInDisplay`. Once the prompt is gone the
+/// last look stays, for the island to fade out.
 private struct SignInSequence: ViewModifier {
     let prompt: SignInMonitor.Prompt?
     @Binding var display: SignInDisplay
@@ -39,12 +37,8 @@ private struct SignInSequence: ViewModifier {
                 switch prompt {
                 case .touchID?:
                     display = .touchID
-                case .password(let length)?:
-                    display = .password(length: length)
                 case .unlocked?:
-                    if case .password = display {
-                        withAnimation(.unlock) { display = .unlocked }
-                    } else if display != .unlocked {
+                    if display == .touchID {
                         withAnimation(.unlock) { display = .filling }
                     }
                 case nil:
@@ -65,32 +59,23 @@ private struct SignInSequence: ViewModifier {
 
 /// The Touch ID fingerprint. It waits unfilled; once the finger is read,
 /// its ridges fill in patch by patch, the way Touch ID setup shows how much
-/// of the finger it has, then it shrinks away, for a check that draws in
-/// or for whatever its parent puts in its place. Arriving already unlocked,
-/// after the password, it only draws the check.
+/// of the finger it has, then it shrinks away as a check draws in.
 ///
 /// Played from one clock rather than chained animations, so each step
 /// carries on from exactly where the last one left off.
 struct TouchIDGlyph: View {
     let size: CGFloat
-    /// `.touchID`, `.filling` or `.unlocked`.
     let display: SignInDisplay
-    var drawsCheck = true
 
     private static let fillSeconds = 0.35
     /// How long the ridges take to fill, after which the check takes over.
     static let fillDuration: Duration = .seconds(fillSeconds)
 
     @State private var unlockStart: Date?
-    @State private var skipsFill = false
 
     var body: some View {
         TimelineView(.animation(paused: unlockStart == nil)) { context in
-            let look = Look(
-                elapsed: unlockStart.map { context.date.timeIntervalSince($0) },
-                skipsFill: skipsFill,
-                drawsCheck: drawsCheck
-            )
+            let look = Look(elapsed: unlockStart.map { context.date.timeIntervalSince($0) })
             ZStack {
                 ZStack {
                     symbol
@@ -116,19 +101,10 @@ struct TouchIDGlyph: View {
         }
         .frame(width: size, height: size)
         .onChange(of: display, initial: true) {
-            switch display {
-            case .filling:
-                if unlockStart == nil {
-                    unlockStart = .now
-                }
-            case .unlocked:
-                if unlockStart == nil {
-                    skipsFill = true
-                    unlockStart = .now
-                }
-            default:
+            if display == .touchID {
                 unlockStart = nil
-                skipsFill = false
+            } else if unlockStart == nil {
+                unlockStart = .now
             }
         }
         .accessibilityHidden(true)
@@ -149,22 +125,17 @@ struct TouchIDGlyph: View {
         var check = 0.0
         var checkScale = 0.8
 
-        init(elapsed: TimeInterval?, skipsFill: Bool, drawsCheck: Bool) {
+        init(elapsed: TimeInterval?) {
             guard let elapsed else { return }
             let fill = TouchIDGlyph.fillSeconds
-            if skipsFill {
-                printOpacity = 0
-            } else {
-                coverage = Self.easeOut(Self.progress(elapsed, from: 0, over: fill))
-                // Green as the last patches go in, then it shrinks away under
-                // the check, which starts drawing just before it's full.
-                isGreen = elapsed >= fill * 0.6
-                let away = Self.easeIn(Self.progress(elapsed, from: fill - 0.05, over: 0.2))
-                printOpacity = 1 - away
-                printScale = 1 - 0.25 * away
-            }
-            guard drawsCheck else { return }
-            let drawing = Self.progress(elapsed, from: skipsFill ? 0 : fill - 0.08, over: 0.28)
+            coverage = Self.easeOut(Self.progress(elapsed, from: 0, over: fill))
+            // Green as the last patches go in, then it shrinks away under the
+            // check, which starts drawing just before it's full.
+            isGreen = elapsed >= fill * 0.6
+            let away = Self.easeIn(Self.progress(elapsed, from: fill - 0.05, over: 0.2))
+            printOpacity = 1 - away
+            printScale = 1 - 0.25 * away
+            let drawing = Self.progress(elapsed, from: fill - 0.08, over: 0.28)
             check = Self.easeOut(drawing)
             checkScale = 0.8 + 0.2 * Self.easeOutBack(drawing)
         }
@@ -175,7 +146,6 @@ struct TouchIDGlyph: View {
 
         private static func easeIn(_ x: Double) -> Double { x * x }
         private static func easeOut(_ x: Double) -> Double { 1 - (1 - x) * (1 - x) }
-        private static func easeInOut(_ x: Double) -> Double { x < 0.5 ? 2 * x * x : 1 - pow(-2 * x + 2, 2) / 2 }
         /// Overshoots a little before settling, like a spring.
         private static func easeOutBack(_ x: Double) -> Double {
             let overshoot = 1.7
@@ -265,26 +235,6 @@ nonisolated private struct Checkmark: Shape {
     }
 }
 
-/// The macOS login window's head shake for a wrong password.
-private struct RejectionShake: ViewModifier {
-    let trigger: Int
-
-    func body(content: Content) -> some View {
-        content.keyframeAnimator(initialValue: 0.0, trigger: trigger) { content, offset in
-            content.offset(x: offset)
-        } keyframes: { _ in
-            KeyframeTrack {
-                LinearKeyframe(-10, duration: 0.05)
-                LinearKeyframe(9, duration: 0.08)
-                LinearKeyframe(-7, duration: 0.08)
-                LinearKeyframe(5, duration: 0.07)
-                LinearKeyframe(-2, duration: 0.06)
-                SpringKeyframe(0, duration: 0.2, spring: .snappy)
-            }
-        }
-    }
-}
-
 /// The lock beside the notch, springing open in green once unlocked.
 private struct SignInLock: View {
     let isUnlocked: Bool
@@ -300,36 +250,8 @@ private struct SignInLock: View {
     }
 }
 
-/// A big lock that arrives shut, in white, and springs open in green a
-/// moment later.
-private struct OpeningLock: View {
-    let size: CGFloat
-
-    /// Long enough to see it shut before it opens.
-    private static let openDelay: Duration = .milliseconds(120)
-
-    @State private var isOpen = false
-
-    var body: some View {
-        Image(systemName: isOpen ? "lock.open.fill" : "lock.fill")
-            .font(.system(size: size, weight: .medium))
-            .foregroundStyle(isOpen ? Color.signInUnlocked : .white)
-            // Morphs the shackle open rather than swapping the symbol.
-            .contentTransition(.symbolEffect(.replace.magic(fallback: .replace.downUp.byLayer)))
-            .task {
-                do {
-                    try await Task.sleep(for: Self.openDelay)
-                } catch {
-                    return
-                }
-                withAnimation(.unlock) { isOpen = true }
-            }
-            .accessibilityHidden(true)
-    }
-}
-
-/// A lock in the left wing and, in the right, the fingerprint, a dot for
-/// each character of the password, or a check once unlocked.
+/// A lock in the left wing and, in the right, the fingerprint, which fills
+/// in and gives way to a check once unlocked.
 struct SignInCompactView: View {
     let signIn: SignInMonitor
     let notchSize: CGSize
@@ -342,128 +264,19 @@ struct SignInCompactView: View {
         HStack(spacing: 0) {
             SignInLock(isUnlocked: display.isUnlocked)
             Spacer(minLength: 0)
-            trail
-                .modifier(RejectionShake(trigger: signIn.rejections))
+            TouchIDGlyph(size: 21, display: display)
         }
         .padding(.horizontal, layout.sideInset + 4)
-        .frame(width: NotchViewModel.signInWidth(notch: notchSize, prompt: signIn.prompt), height: notchSize.height)
+        .frame(width: NotchViewModel.signInWidth(notch: notchSize), height: notchSize.height)
         .modifier(SignInSequence(prompt: signIn.prompt, display: $display))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Self.accessibilityLabel(display))
-        .accessibilityAddTraits(.isButton)
     }
 
-    @ViewBuilder
-    private var trail: some View {
-        switch display {
-        // One case, so the fingerprint is the same view all the way to the
-        // check.
-        case .touchID, .filling, .unlocked:
-            TouchIDGlyph(size: 21, display: display)
-        case .password(let length) where length == 0:
-            Text("Password")
-                .font(.system(size: 15, weight: .medium))
-                .lineLimit(1)
-        case .password(let length):
-            HStack(spacing: 4) {
-                // As many as fit in the wing; the expanded view counts on.
-                ForEach(0..<min(length, 6), id: \.self) { _ in
-                    Circle()
-                        .frame(width: 6, height: 6)
-                        .transition(.scale(scale: 0.2).combined(with: .opacity))
-                }
-            }
-            .animation(.spring(duration: 0.25, bounce: 0.4), value: length)
-        }
-    }
-
-    static func accessibilityLabel(_ display: SignInDisplay) -> String {
+    private static func accessibilityLabel(_ display: SignInDisplay) -> String {
         switch display {
         case .touchID: "Waiting for Touch ID"
-        case .password(let length): "Password, \(length) characters typed"
         case .filling, .unlocked: "Unlocked"
-        }
-    }
-}
-
-/// The square the prompt opens into, as on the iPhone: a big fingerprint,
-/// or the keyboard with a row of dots filling as the password is typed,
-/// and once unlocked, a lock that springs open.
-struct SignInExpandedView: View {
-    let signIn: SignInMonitor
-    let notchHeight: CGFloat
-
-    static let width: CGFloat = 220
-    /// Under the notch: the 64pt glyph, its label and the dots.
-    static let bodyHeight: CGFloat = 150
-    static let cornerRadius: CGFloat = 36
-
-    private static let glyphSize: CGFloat = 64
-    private static let dotCount = 8
-
-    @State private var display = SignInDisplay.touchID
-
-    var body: some View {
-        VStack(spacing: 10) {
-            glyph
-                .frame(width: Self.glyphSize, height: Self.glyphSize)
-            Text(label)
-                .font(.system(size: 15, weight: .semibold))
-                .contentTransition(.opacity)
-            if case .password(let length) = display {
-                dots(typed: length)
-                    .modifier(RejectionShake(trigger: signIn.rejections))
-                    .transition(.opacity)
-            }
-        }
-        .frame(width: Self.width, height: Self.bodyHeight)
-        .padding(.top, notchHeight)
-        .frame(width: Self.width, height: notchHeight + Self.bodyHeight, alignment: .top)
-        .animation(.easeOut(duration: 0.25), value: label)
-        .modifier(SignInSequence(prompt: signIn.prompt, display: $display))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(SignInCompactView.accessibilityLabel(display))
-    }
-
-    @ViewBuilder
-    private var glyph: some View {
-        switch display {
-        // One case, so the fingerprint fills in and shrinks away as the
-        // lock takes its place, rather than being swapped out.
-        case .touchID, .filling, .unlocked:
-            ZStack {
-                TouchIDGlyph(size: Self.glyphSize, display: display, drawsCheck: false)
-                if display == .unlocked {
-                    OpeningLock(size: 44)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                }
-            }
-        case .password:
-            Image(systemName: "keyboard")
-                .font(.system(size: 44, weight: .light))
-                .transition(.opacity)
-        }
-    }
-
-    private func dots(typed: Int) -> some View {
-        HStack(spacing: 6) {
-            ForEach(0..<Self.dotCount, id: \.self) { index in
-                let isTyped = index < typed
-                Circle()
-                    .fill(.white.opacity(isTyped ? 1 : 0.22))
-                    .frame(width: 8, height: 8)
-                    .scaleEffect(isTyped ? 1 : 0.85)
-            }
-        }
-        .frame(height: 8)
-        .animation(.spring(duration: 0.2, bounce: 0.5), value: typed)
-    }
-
-    private var label: String {
-        switch display {
-        case .touchID, .filling: "Touch ID"
-        case .password: "Password"
-        case .unlocked: "Unlocked"
         }
     }
 }

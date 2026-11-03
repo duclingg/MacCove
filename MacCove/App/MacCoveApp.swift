@@ -12,10 +12,10 @@ struct MacCoveApp: App {
                 set: { launchAtLogin.setEnabled($0) }
             ))
             .onAppear { launchAtLogin.refresh() }
-            // Without it the island still shows Touch ID prompts, but not
-            // the password dots or the unlock.
+            // Without it the island still shows Touch ID prompts, but can't
+            // tell an unlock from a cancel, so it never shows the unlock.
             if !appDelegate.signIn.hasAccessibilityAccess {
-                Button("Show Password Typing and Unlocks…") {
+                Button("Show Touch ID Unlocks…") {
                     appDelegate.signIn.requestAccessibilityAccess()
                 }
             }
