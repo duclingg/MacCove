@@ -9,25 +9,36 @@ enum IslandState {
     case expanded
 }
 
-/// A system event that takes the island over, ahead of Now Playing, as on
-/// the iPhone.
-enum IslandAlert: Equatable {
-    /// "Charging" beside the notch while the battery fills up.
-    case charging
+/// Something the island shows. Several can run at once, as on the iPhone:
+/// the first takes the island and the rest wait in bubbles beside it.
+enum IslandActivity: Hashable {
+    /// Touch ID on the lock screen. Stays until the unlock has played,
+    /// alone and only ever as the pill.
+    case signIn
     /// The level and a button for Low Power Mode, or its confirmation.
     case lowBattery
-    /// A Touch ID prompt or the lock screen. Stays for as long as it does,
-    /// ahead of the battery alerts, and only ever as the pill.
-    case signIn
+    /// "Charging" beside the notch while the battery fills up.
+    case charging
+    case nowPlaying
 
-    /// How long a battery alert stays; a sign-in leaves with its prompt.
+    /// How long a battery alert stays; the others leave by themselves.
     var duration: Duration {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn: .zero
+        case .signIn, .nowPlaying: .zero
         }
     }
+}
+
+/// An activity waiting beside the island, in a bubble of its own.
+struct IslandBubble: Equatable, Identifiable {
+    let activity: IslandActivity
+    /// From the top of the screen, with x measured from the island's
+    /// centre line.
+    let frame: CGRect
+
+    var id: IslandActivity { activity }
 }
 
 struct IslandGeometry: Equatable {
@@ -47,8 +58,11 @@ final class NotchViewModel {
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
 
-    private(set) var isHovering = false
+    /// The island or bubble under the cursor.
+    private(set) var hovered: IslandActivity?
     private var presentation: IslandState = .compact
+    /// What was clicked open, which leads while the island is expanded.
+    private var expandedActivity: IslandActivity?
     /// Paused media steps out of the way, like the iPhone: it stays while
     /// you're using the expanded player, but not as a compact pill.
     private var isDismissedForPause = false
@@ -58,8 +72,9 @@ final class NotchViewModel {
     /// A full-screen app is in front on this display: the island steps
     /// aside, as on the iPhone.
     private var isFullScreenActive = false
-    /// Shown in place of Now Playing until it times out.
-    private(set) var alert: IslandAlert?
+    private var isSigningIn = false
+    /// The charging pill or the low battery alert, until it times out.
+    private var batteryAlert: IslandActivity?
 
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
@@ -82,16 +97,53 @@ final class NotchViewModel {
         }
     }
 
+    /// Most that run at once: one in the island and two in bubbles.
+    static let maxActivities = 3
+
+    /// What's running, the island's first and the rest for the bubbles.
+    var activities: [IslandActivity] {
+        // A full-screen app hides everything but the lock screen, unless the
+        // island was brought back on purpose.
+        let isShowingAll = !isFullScreenActive || isRevealedByHover
+        // The lock screen and battery alerts take the whole island to
+        // themselves. The lock screen shows over full-screen apps too.
+        if isSigningIn {
+            return [.signIn]
+        }
+        if let batteryAlert {
+            return isShowingAll ? [batteryAlert] : []
+        }
+        var running: [IslandActivity] = []
+        if isShowingAll, isNowPlayingShown {
+            running.append(.nowPlaying)
+        }
+        if presentation == .expanded, let expandedActivity, let index = running.firstIndex(of: expandedActivity) {
+            running.insert(running.remove(at: index), at: 0)
+        }
+        return Array(running.prefix(Self.maxActivities))
+    }
+
+    var primaryActivity: IslandActivity? {
+        activities.first
+    }
+
     var state: IslandState {
-        guard nowPlaying.hasMedia || alert != nil else { return .idle }
-        // A prompt answers something you just did, so it shows in full
-        // screen too.
-        if alert == .signIn { return .compact }
-        // Brought back on purpose: shown whatever else is going on.
-        if isRevealedByHover { return presentation }
-        if isFullScreenActive { return .idle }
-        if alert == nil, presentation == .compact, isDismissedForPause { return .idle }
-        return presentation
+        guard let primary = primaryActivity else { return .idle }
+        // Whatever was opened has to still be running to stay open, and in
+        // front: locking the screen closes it.
+        if presentation == .expanded, primary == expandedActivity { return .expanded }
+        return .compact
+    }
+
+    /// Paused media steps aside, unless you're using the player or brought
+    /// it back through the hover strip.
+    private var isNowPlayingShown: Bool {
+        guard nowPlaying.hasMedia else { return false }
+        return !isDismissedForPause || isRevealedByHover || (presentation == .expanded && expandedActivity == .nowPlaying)
+    }
+
+    var isHovering: Bool {
+        hovered != nil
     }
 
     /// Without a camera housing to hide behind, an idle island would be a
@@ -109,6 +161,8 @@ final class NotchViewModel {
 
     var geometry: IslandGeometry {
         let notch = notchSize
+        let primary = primaryActivity
+        let grow: CGSize = hovered != nil && hovered == primary ? Self.hoverGrowth : .zero
         switch state {
         case .idle where hasPhysicalNotch:
             return IslandGeometry(size: notch, cornerRadius: 10, isLifted: false)
@@ -120,30 +174,45 @@ final class NotchViewModel {
                 cornerRadius: Self.compactCornerRadius,
                 isLifted: false
             )
-        case .compact where alert == .signIn:
-            let grow: CGSize = isHovering ? CGSize(width: 8, height: 3) : .zero
+        case .compact where primary == .signIn:
             return IslandGeometry(
                 size: CGSize(width: Self.signInWidth(notch: notch) + grow.width, height: notch.height + grow.height),
                 cornerRadius: Self.compactCornerRadius,
                 isLifted: false
             )
-        case .compact where alert == .lowBattery:
+        case .compact where primary == .lowBattery:
             return IslandGeometry(
                 size: CGSize(width: Self.expandedWidth, height: notch.height + Self.alertBodyHeight),
                 cornerRadius: Self.alertCornerRadius,
                 isLifted: true
             )
         case .compact:
-            let grow: CGSize = isHovering ? CGSize(width: 8, height: 3) : .zero
-            let width = alert == .charging ? Self.chargingWidth(notch: notch) : Self.compactWidth(notch: notch)
+            let width = primary == .charging ? Self.chargingWidth(notch: notch) : Self.compactWidth(notch: notch)
             return IslandGeometry(
                 size: CGSize(width: width + grow.width, height: notch.height + grow.height),
                 cornerRadius: Self.compactCornerRadius,
                 isLifted: false
             )
         case .expanded:
-            let body = alert == nil ? Self.expandedBodyHeight : BatteryExpandedView.bodyHeight
+            let body = primary == .nowPlaying ? Self.expandedBodyHeight : BatteryExpandedView.bodyHeight
             return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
+        }
+    }
+
+    /// The second activity on the right of the pill, as on the iPhone, and
+    /// a third on the left. Never beside the open island.
+    var bubbles: [IslandBubble] {
+        guard state == .compact else { return [] }
+        let islandWidth = geometry.size.width
+        return activities.dropFirst().enumerated().map { index, activity in
+            let grow: CGFloat = hovered == activity ? Self.bubbleHoverGrowth : 0
+            let size = CGSize(width: notchSize.height + grow, height: notchSize.height + grow)
+            let distance = islandWidth / 2 + Self.bubbleGap + size.width / 2
+            let midX = index == 0 ? distance : -distance
+            return IslandBubble(
+                activity: activity,
+                frame: CGRect(x: midX - size.width / 2, y: 0, width: size.width, height: size.height)
+            )
         }
     }
 
@@ -153,6 +222,12 @@ final class NotchViewModel {
     /// tucked-away island back on screens without a notch.
     static let hoverStripHeight: CGFloat = 5
     static let compactCornerRadius: CGFloat = 12
+    /// How much the pill grows under the cursor.
+    static let hoverGrowth = CGSize(width: 8, height: 3)
+    /// Between the pill and a bubble, enough for the two to read as
+    /// separate shapes.
+    static let bubbleGap: CGFloat = 8
+    static let bubbleHoverGrowth: CGFloat = 3
     static let expandedWidth: CGFloat = 420
     static let expandedCornerRadius: CGFloat = 32
     /// Gap from the island's sides to the content.
@@ -196,19 +271,25 @@ final class NotchViewModel {
 
     // MARK: - Interaction
 
-    func expand() {
-        guard alert != .signIn else { return }
+    /// Opens the activity clicked: the island's own, or one from a bubble.
+    func expand(_ activity: IslandActivity? = nil) {
+        guard let activity = activity ?? primaryActivity, activity != .signIn else { return }
         collapseTask?.cancel()
         alertTask?.cancel()
+        expandedActivity = activity
         presentation = .expanded
     }
 
-    func setHovering(_ hovering: Bool) {
-        guard hovering != isHovering else { return }
-        isHovering = hovering
+    /// The island or bubble under the cursor, `nil` for neither.
+    func setHovering(_ activity: IslandActivity?) {
+        guard activity != hovered else { return }
+        let wasHovering = isHovering
+        hovered = activity
+        // Moving between the island and a bubble is still hovering.
+        guard isHovering != wasHovering else { return }
         scheduleCollapseIfNeeded()
         // An alert stays while the cursor is on it, then leaves shortly after.
-        if hovering {
+        if isHovering {
             alertTask?.cancel()
         } else if presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
@@ -231,48 +312,52 @@ final class NotchViewModel {
     func revealFromHoverStrip() {
         guard canRevealOnHover else { return }
         isRevealedByHover = true
-        setHovering(true)
+        setHovering(primaryActivity)
     }
 
     private func batteryEvent(_ event: BatteryMonitor.Event) {
         switch event {
         case .pluggedIn:
-            showAlert(.charging, for: IslandAlert.charging.duration)
+            showAlert(.charging, for: IslandActivity.charging.duration)
         case .lowBattery:
-            showAlert(.lowBattery, for: IslandAlert.lowBattery.duration)
+            showAlert(.lowBattery, for: IslandActivity.lowBattery.duration)
         case .lowPowerModeEnabled:
             // Confirms the button just clicked briefly, or announces it being
             // turned on elsewhere.
-            showAlert(.lowBattery, for: alert == .lowBattery ? .seconds(2.5) : .seconds(4))
+            showAlert(.lowBattery, for: batteryAlert == .lowBattery ? .seconds(2.5) : .seconds(4))
         }
     }
 
-    /// Takes over the island as the prompt appears, and leaves with it.
+    /// Takes over the island as the screen locks, replacing any battery
+    /// alert, and leaves once the unlock has played.
     private func signInChanged(_ prompt: SignInMonitor.Prompt?) {
         guard prompt != nil else {
-            guard alert == .signIn else { return }
+            guard isSigningIn else { return }
             collapseTask?.cancel()
-            alertTask?.cancel()
-            alert = nil
+            isSigningIn = false
             presentation = .compact
             return
         }
 
-        if alert != .signIn {
+        if !isSigningIn {
             collapseTask?.cancel()
             alertTask?.cancel()
-            alert = .signIn
+            isSigningIn = true
+            batteryAlert = nil
             presentation = .compact
         }
     }
 
     /// Takes over the island, unless the battery details are already open,
-    /// in which case they just update. A sign-in prompt stays in front.
-    private func showAlert(_ newAlert: IslandAlert, for duration: Duration) {
-        guard alert != .signIn else { return }
-        let isShowingDetails = alert != nil && presentation == .expanded
-        alert = newAlert
-        if !isShowingDetails {
+    /// in which case they just update. The lock screen stays in front.
+    private func showAlert(_ newAlert: IslandActivity, for duration: Duration) {
+        guard !isSigningIn else { return }
+        let isShowingDetails = batteryAlert != nil && state == .expanded
+        batteryAlert = newAlert
+        if isShowingDetails {
+            // Both alerts open the same details.
+            expandedActivity = newAlert
+        } else {
             collapseTask?.cancel()
             presentation = .compact
         }
@@ -283,12 +368,11 @@ final class NotchViewModel {
     /// leaving schedules it again.
     private func scheduleAlertDismissal(after delay: Duration) {
         alertTask?.cancel()
-        // A sign-in times itself, by its prompt.
-        guard alert != nil, alert != .signIn else { return }
+        guard batteryAlert != nil else { return }
         alertTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self, !self.isHovering, self.presentation != .expanded else { return }
-            self.alert = nil
+            self.batteryAlert = nil
         }
     }
 

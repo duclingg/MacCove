@@ -32,7 +32,7 @@ struct NowPlayingCompactView: View {
         .padding(.vertical, layout.verticalInset)
         .frame(width: NotchViewModel.compactWidth(notch: notchSize), height: notchSize.height)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityText)
+        .accessibilityLabel(nowPlayingDescription(nowPlaying))
         .accessibilityAddTraits(.isButton)
     }
 
@@ -49,11 +49,33 @@ struct NowPlayingCompactView: View {
             AudioBars(isPlaying: true, color: nowPlaying.tint)
         }
     }
+}
 
-    private var accessibilityText: String {
-        guard let track = nowPlaying.track else { return "Now Playing" }
-        return "Now Playing: \(track.title) by \(track.artist)"
+/// Now Playing in a bubble beside another activity: just the artwork, as
+/// the pill draws it.
+struct NowPlayingMinimalView: View {
+    let nowPlaying: NowPlayingModel
+    let notchSize: CGSize
+
+    var body: some View {
+        let artSize = CompactLayout(notch: notchSize).artSize
+
+        ArtworkView(
+            image: nowPlaying.artwork,
+            size: artSize,
+            cornerRadius: (artSize * 0.18).rounded(),
+            flipID: nowPlaying.track?.id,
+            fallbackIcon: nowPlaying.appIcon
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(nowPlayingDescription(nowPlaying))
+        .accessibilityAddTraits(.isButton)
     }
+}
+
+private func nowPlayingDescription(_ nowPlaying: NowPlayingModel) -> String {
+    guard let track = nowPlaying.track else { return "Now Playing" }
+    return "Now Playing: \(track.title) by \(track.artist)"
 }
 
 /// Full player: route, track details, scrubber and transport controls,

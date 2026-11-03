@@ -9,10 +9,11 @@ struct IslandView: View {
     /// Extra distance past the top edge when tucked away, enough to clear
     /// the few points the island grows on hover.
     private static let tuckClearance: CGFloat = 12
-    private static let topBleed: CGFloat = 8
+    fileprivate static let topBleed: CGFloat = 8
 
     var body: some View {
         let geometry = viewModel.geometry
+        let bubbles = viewModel.bubbles
 
         ZStack(alignment: .top) {
             // Black above the island's top edge, normally off screen. If the
@@ -43,6 +44,12 @@ struct IslandView: View {
                         viewModel.expand()
                     }
                 }
+
+            ForEach(bubbles) { bubble in
+                IslandBubbleView(bubble: bubble, viewModel: viewModel)
+                    .offset(x: bubble.frame.midX)
+                    .transition(.islandBubble(bubble))
+            }
         }
         // On screens without a notch, slide down from the top edge when an
         // activity starts and back up past it when nothing is left. The slide
@@ -52,6 +59,7 @@ struct IslandView: View {
         .animation(.islandSlide, value: viewModel.isTuckedAway)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.island, value: geometry)
+        .animation(.island, value: bubbles)
         .environment(\.colorScheme, .dark)
         .foregroundStyle(.white)
     }
@@ -66,7 +74,7 @@ struct IslandView: View {
             case .idle:
                 EmptyView()
             case .compact:
-                switch viewModel.alert {
+                switch viewModel.primaryActivity {
                 case .charging?:
                     ChargingCompactView(battery: viewModel.battery, notchSize: notch)
                         .transition(.islandContent)
@@ -76,20 +84,20 @@ struct IslandView: View {
                 case .signIn?:
                     SignInCompactView(signIn: viewModel.signIn, notchSize: notch)
                         .transition(.islandContent)
-                case nil:
+                case .nowPlaying?:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
                         notchSize: notch,
                         routeSystemImage: viewModel.audioRoute.route?.systemImage
                     )
                     .transition(.islandContent)
+                case nil:
+                    EmptyView()
                 }
             case .expanded:
-                // Sign-in never opens, so any alert here is the battery's.
-                if viewModel.alert != nil {
-                    BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
-                        .transition(.islandContent)
-                } else {
+                // Sign-in never opens, so anything but the player here is
+                // the battery's.
+                if viewModel.primaryActivity == .nowPlaying {
                     NowPlayingExpandedView(
                         nowPlaying: nowPlaying,
                         notchHeight: notch.height,
@@ -97,8 +105,53 @@ struct IslandView: View {
                         sourceName: viewModel.audioRoute.sourceName
                     )
                     .transition(.islandContent)
+                } else {
+                    BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
+                        .transition(.islandContent)
                 }
             }
+        }
+    }
+}
+
+/// An activity waiting beside the island: the same black, hanging from the
+/// top edge the same way, with its own content centred in it. Clicking it
+/// opens that activity.
+private struct IslandBubbleView: View {
+    let bubble: IslandBubble
+    let viewModel: NotchViewModel
+
+    var body: some View {
+        let size = bubble.frame.size
+
+        ZStack(alignment: .top) {
+            Rectangle()
+                .fill(.black)
+                .frame(width: size.width + IslandShape.earWidth * 2, height: IslandView.topBleed)
+                .offset(y: -IslandView.topBleed)
+                .accessibilityHidden(true)
+
+            IslandShape(cornerRadius: NotchViewModel.compactCornerRadius)
+                .fill(.black)
+                .frame(width: size.width + IslandShape.earWidth * 2, height: size.height)
+
+            content
+                .frame(width: size.width, height: size.height)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    viewModel.expand(bubble.activity)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch bubble.activity {
+        case .nowPlaying:
+            NowPlayingMinimalView(nowPlaying: viewModel.nowPlaying, notchSize: viewModel.notchSize)
+        case .signIn, .charging, .lowBattery:
+            // A prompt always leads, and a battery alert shows alone.
+            EmptyView()
         }
     }
 }
@@ -110,6 +163,19 @@ extension AnyTransition {
         .asymmetric(
             insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.12)),
             removal: .opacity.animation(.easeOut(duration: 0.1))
+        )
+    }
+
+    /// A bubble splits off the side of the island and springs out to its
+    /// place, and goes back in the same way.
+    static func islandBubble(_ bubble: IslandBubble) -> AnyTransition {
+        let towardIsland = (bubble.frame.width + NotchViewModel.bubbleGap) * (bubble.frame.midX > 0 ? -1 : 1)
+        let tucked = AnyTransition.offset(x: towardIsland)
+            .combined(with: .scale(scale: 0.4, anchor: .top))
+            .combined(with: .opacity)
+        return .asymmetric(
+            insertion: tucked.animation(.island),
+            removal: tucked.animation(.easeIn(duration: 0.2))
         )
     }
 }
