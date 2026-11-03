@@ -243,12 +243,17 @@ final class NotchViewModel {
         }
     }
 
-    /// The second activity on the right of the pill, as on the iPhone, and
-    /// a third on the left. Never beside the open island.
+    /// The second activity on the right of the pill, as on the iPhone. A
+    /// third goes on the left when the front app's menus leave room for it
+    /// there, and otherwise beside the second. When the menus fill both
+    /// sides of the notch, there are no bubbles at all, so none covers a
+    /// menu; the others keep running and come back once there's room.
+    /// Never beside the open island.
     var bubbles: [IslandBubble] {
-        guard state == .compact else { return [] }
+        guard state == .compact, appMenus?.spillsPastCentre != true else { return [] }
         let islandWidth = geometry.size.width
         let others = activities.dropFirst()
+        var rightEdge = islandWidth / 2
         return others.enumerated().map { index, activity in
             let grow: CGFloat = hovered == activity ? Self.bubbleHoverGrowth : 0
             // With three running, both bubbles stay square to take up as
@@ -256,14 +261,33 @@ final class NotchViewModel {
             let isWide = others.count == 1 && activity == .nowPlaying && audioRoute.route != nil
             let width = isWide ? Self.wideBubbleWidth(notch: notchSize) : notchSize.height
             let size = CGSize(width: width + grow, height: notchSize.height + grow)
-            let distance = islandWidth / 2 + Self.bubbleGap + size.width / 2
-            let midX = index == 0 ? distance : -distance
+            let midX: CGFloat
+            if index == 1, hasRoomLeftOfIsland(for: width) {
+                midX = -(islandWidth / 2 + Self.bubbleGap + size.width / 2)
+            } else {
+                midX = rightEdge + Self.bubbleGap + size.width / 2
+                rightEdge += Self.bubbleGap + size.width
+            }
             return IslandBubble(
                 activity: activity,
                 frame: CGRect(x: midX - size.width / 2, y: 0, width: size.width, height: size.height),
                 isWide: isWide
             )
         }
+    }
+
+    /// Where the front app's menus reach, as `AppMenuExtent` measured them.
+    /// `nil` when there's no telling, which keeps bubbles off the left.
+    var appMenus: AppMenuSpan?
+
+    /// Judged as if the island and the bubble had both grown under the
+    /// cursor, so hovering never sends a bubble to the other side.
+    private func hasRoomLeftOfIsland(for bubbleWidth: CGFloat) -> Bool {
+        guard let appMenus else { return false }
+        let isIslandHovered = hovered != nil && hovered == primaryActivity
+        let islandWidth = geometry.size.width + (isIslandHovered ? 0 : Self.hoverGrowth.width)
+        let bubbleLeftEdge = -(islandWidth / 2 + Self.bubbleGap + bubbleWidth + Self.bubbleHoverGrowth + IslandShape.earWidth)
+        return bubbleLeftEdge >= appMenus.trailingEdge + Self.menuClearance
     }
 
     // MARK: - Layout constants from the design
@@ -279,6 +303,8 @@ final class NotchViewModel {
     /// and the two read as separate shapes.
     static let bubbleGap: CGFloat = 18
     static let bubbleHoverGrowth: CGFloat = 3
+    /// Left between the front app's last menu and a bubble beside it.
+    static let menuClearance: CGFloat = 8
     /// Between the artwork and the audio device in a wide bubble.
     static let bubbleRouteGap: CGFloat = 6
 
