@@ -63,16 +63,33 @@ final class NotchWindowController {
     }
 
     private func updateMouse() {
-        guard let screen, viewModel.state != .idle else {
+        guard let screen else { return }
+        let mouse = NSEvent.mouseLocation
+        let top = screen.frame.maxY
+
+        // A tucked-away island comes back when the cursor reaches the strip
+        // along the top edge, then is handled like any other hover below.
+        if viewModel.canRevealOnHover {
+            let width = NotchViewModel.compactWidth(notch: viewModel.notchSize)
+            let stripHeight = NotchViewModel.hoverStripHeight
+            // Reaches 1pt past the edge so the topmost row of pixels counts.
+            let strip = NSRect(x: screen.frame.midX - width / 2, y: top - stripHeight, width: width, height: stripHeight + 1)
+            if strip.contains(mouse) {
+                viewModel.revealFromHoverStrip()
+            }
+        }
+
+        guard viewModel.state != .idle else {
             setReceivesMouse(false)
             viewModel.setHovering(false)
             return
         }
-        let mouse = NSEvent.mouseLocation
-        let top = screen.frame.maxY
 
+        // Also reaches 1pt past the edge. Without it, a cursor parked in the
+        // topmost row would count as over the strip but not the island, so
+        // the island would keep tucking away and coming back.
         let island = viewModel.geometry.size
-        let islandFrame = NSRect(x: screen.frame.midX - island.width / 2, y: top - island.height, width: island.width, height: island.height)
+        let islandFrame = NSRect(x: screen.frame.midX - island.width / 2, y: top - island.height, width: island.width, height: island.height + 1)
         let isOverIsland = islandFrame.contains(mouse)
 
         setReceivesMouse(isOverIsland)

@@ -29,6 +29,13 @@ final class NotchPanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    /// AppKit nudges windows to keep them clear of the menu bar. The island
+    /// has to sit exactly flush with the top edge, over the menu bar, so
+    /// take the frame as given.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
 }
 
 /// Lets the first click on the island act immediately, even though the panel

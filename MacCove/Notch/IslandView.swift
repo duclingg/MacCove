@@ -6,10 +6,24 @@ import SwiftUI
 struct IslandView: View {
     let viewModel: NotchViewModel
 
+    /// Extra distance past the top edge when tucked away, enough to clear
+    /// the few points the island grows on hover.
+    private static let tuckClearance: CGFloat = 12
+    private static let topBleed: CGFloat = 8
+
     var body: some View {
         let geometry = viewModel.geometry
 
         ZStack(alignment: .top) {
+            // Black above the island's top edge, normally off screen. If the
+            // island ever sits a pixel or two low (rounding mid-slide on a
+            // scaled display), this fills the gap instead of the wallpaper.
+            Rectangle()
+                .fill(.black)
+                .frame(width: geometry.size.width + IslandShape.earWidth * 2, height: Self.topBleed)
+                .offset(y: -Self.topBleed)
+                .accessibilityHidden(true)
+
             IslandShape(cornerRadius: geometry.cornerRadius)
                 .fill(.black)
                 .frame(width: geometry.size.width + IslandShape.earWidth * 2, height: geometry.size.height)
@@ -30,10 +44,14 @@ struct IslandView: View {
                     }
                 }
         }
-        .opacity(viewModel.isHidden ? 0 : 1)
+        // On screens without a notch, slide down from the top edge when an
+        // activity starts and back up past it when nothing is left. The slide
+        // never overshoots: a bounce would pull the island's top edge off the
+        // screen edge and show a sliver of desktop above it.
+        .offset(y: viewModel.isTuckedAway ? -(viewModel.notchSize.height + Self.tuckClearance) : 0)
+        .animation(.islandSlide, value: viewModel.isTuckedAway)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.island, value: geometry)
-        .animation(.easeOut(duration: 0.2), value: viewModel.isHidden)
         .environment(\.colorScheme, .dark)
         .foregroundStyle(.white)
     }
@@ -48,11 +66,20 @@ struct IslandView: View {
             case .idle:
                 EmptyView()
             case .compact:
-                NowPlayingCompactView(nowPlaying: nowPlaying, notchSize: notch)
-                    .transition(.islandContent)
+                NowPlayingCompactView(
+                    nowPlaying: nowPlaying,
+                    notchSize: notch,
+                    routeSystemImage: viewModel.audioRoute.route?.systemImage
+                )
+                .transition(.islandContent)
             case .expanded:
-                NowPlayingExpandedView(nowPlaying: nowPlaying, notchHeight: notch.height)
-                    .transition(.islandContent)
+                NowPlayingExpandedView(
+                    nowPlaying: nowPlaying,
+                    notchHeight: notch.height,
+                    route: viewModel.audioRoute.route,
+                    sourceName: viewModel.audioRoute.sourceName
+                )
+                .transition(.islandContent)
             }
         }
     }

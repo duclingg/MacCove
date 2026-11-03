@@ -197,6 +197,8 @@ struct IslandIconButton: View {
 
 /// Elapsed time, a scrubbable progress track and time remaining.
 struct PlaybackProgressView: View {
+    static let height: CGFloat = 18
+
     let nowPlaying: NowPlayingModel
 
     @State private var scrubFraction: Double?
@@ -218,14 +220,14 @@ struct PlaybackProgressView: View {
 
             HStack(spacing: 10) {
                 Text(Self.format(wholeElapsed))
-                    .frame(width: 30, alignment: .leading)
+                    .frame(width: 36, alignment: .leading)
                 track(fraction: fraction, duration: duration)
                 Text(duration > 0 ? "-" + Self.format(remaining) : "--:--")
-                    .frame(width: 34, alignment: .trailing)
+                    .frame(width: 42, alignment: .trailing)
             }
-            .font(.system(size: 11).monospacedDigit())
+            .font(.system(size: 13, weight: .medium).monospacedDigit())
             .foregroundStyle(.islandSecondary)
-            .frame(height: 16)
+            .frame(height: Self.height)
         }
         // Line the clock up with the player's own playhead while visible:
         // straight away, after play/pause, then every few seconds.
@@ -252,7 +254,7 @@ struct PlaybackProgressView: View {
                         .scaleEffect(x: fraction, y: 1, anchor: .leading)
                 }
                 .clipShape(Capsule())
-                .frame(height: scrubFraction == nil ? 4 : 6)
+                .frame(height: scrubFraction == nil ? 5 : 8)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .gesture(

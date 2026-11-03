@@ -48,10 +48,18 @@ final class NowPlayingModel {
     /// Lets the island dismiss itself on pause, like the iPhone.
     @ObservationIgnored var onPlayingChange: ((Bool) -> Void)?
     @ObservationIgnored private let controller = MediaController()
-    @ObservationIgnored private let music = MusicScripting()
+    @ObservationIgnored private let music: MusicScripting
     @ObservationIgnored private var artworkTask: Task<Void, Never>?
 
+    init(music: MusicScripting) {
+        self.music = music
+    }
+
     var hasMedia: Bool { track != nil }
+
+    var isAppleMusicPlaying: Bool {
+        isPlaying && track?.bundleIdentifier == MusicScripting.bundleIdentifier
+    }
 
     /// Apps without a way to save tracks get no button at all.
     var favoriteStyle: FavoriteStyle? {
