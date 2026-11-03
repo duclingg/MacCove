@@ -167,18 +167,23 @@ struct XcodeMinimalView: View {
     let notchSize: CGSize
 
     var body: some View {
-        let artSize = CompactLayout(notch: notchSize).artSize
+        let layout = BubbleLayout(notch: notchSize)
 
         Group {
             if let build = xcode.build, build.phase == .inProgress, build.action != .run {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     ZStack {
-                        BuildRing(progress: buildProgress(build, at: context.date), diameter: 27.5, lineWidth: 2.5, trackOpacity: 0.18)
-                        XcodeIcon(size: 15)
+                        BuildRing(
+                            progress: buildProgress(build, at: context.date),
+                            diameter: layout.ringDiameter,
+                            lineWidth: layout.ringLineWidth,
+                            trackOpacity: 0.18
+                        )
+                        XcodeIcon(size: (layout.ringDiameter * 0.55).rounded())
                     }
                 }
             } else {
-                XcodeIcon(size: artSize)
+                XcodeIcon(size: layout.artSize)
             }
         }
         .accessibilityElement(children: .ignore)

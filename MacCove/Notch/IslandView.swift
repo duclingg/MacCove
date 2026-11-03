@@ -90,6 +90,9 @@ struct IslandView: View {
                 case .terminal?:
                     TerminalCompactView(terminal: viewModel.terminal, notchSize: notch)
                         .transition(.islandContent)
+                case .claudeCode?:
+                    ClaudeCodeCompactView(claude: viewModel.claude, notchSize: notch)
+                        .transition(.islandContent)
                 case .nowPlaying?:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
@@ -101,8 +104,8 @@ struct IslandView: View {
                     EmptyView()
                 }
             case .expanded:
-                // Sign-in never opens, so anything but the player, a build or
-                // a command here is the battery's.
+                // Sign-in never opens, so anything but the player, a build, a
+                // command or an agent here is the battery's.
                 switch viewModel.primaryActivity {
                 case .nowPlaying?:
                     NowPlayingExpandedView(
@@ -117,6 +120,9 @@ struct IslandView: View {
                         .transition(.islandContent)
                 case .terminal?:
                     TerminalExpandedView(terminal: viewModel.terminal, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case .claudeCode?:
+                    ClaudeCodeExpandedView(claude: viewModel.claude, notchHeight: notch.height)
                         .transition(.islandContent)
                 default:
                     BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
@@ -158,14 +164,14 @@ private struct IslandBubbleView: View {
                         }
                         .transition(.islandContent)
                 }
+            }
+            .frame(width: size.width, height: size.height)
         }
     }
 
     @ViewBuilder
     private func content(for activity: IslandActivity) -> some View {
         switch activity {
-            }
-            .frame(width: size.width, height: size.height)
         case .nowPlaying:
             NowPlayingMinimalView(
                 nowPlaying: viewModel.nowPlaying,
@@ -176,6 +182,8 @@ private struct IslandBubbleView: View {
             XcodeMinimalView(xcode: viewModel.xcode, notchSize: viewModel.notchSize)
         case .terminal:
             TerminalMinimalView(terminal: viewModel.terminal, notchSize: viewModel.notchSize)
+        case .claudeCode:
+            ClaudeCodeMinimalView(claude: viewModel.claude, notchSize: viewModel.notchSize)
         case .signIn, .charging, .lowBattery:
             // A prompt always leads, and a battery alert shows alone.
             EmptyView()

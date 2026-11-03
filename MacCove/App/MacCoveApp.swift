@@ -4,8 +4,8 @@ import SwiftUI
 struct MacCoveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var launchAtLogin = LaunchAtLogin()
-    /// Bubbles stay clear of the front app's menus only with Accessibility
-    /// access.
+    /// Bubbles stay clear of the front app's menus, and Stop presses Esc,
+    /// only with Accessibility access.
     @State private var hasAccessibility = AppMenuExtent.isAllowed
     @AppStorage(TerminalHook.thresholdKey) private var terminalThreshold = TerminalHook.defaultThreshold
 
@@ -24,6 +24,9 @@ struct MacCoveApp: App {
             }
             Button("Set Up Terminal Commands…") {
                 TerminalHook.showSetup()
+            }
+            Button("Set Up Claude Code…") {
+                ClaudeCodeSetup.showSetup()
             }
             if !hasAccessibility {
                 Button("Allow Accessibility Access…") {
@@ -54,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchWindowController?
     private var xcode: XcodeBuildMonitor?
     private var terminal: TerminalCommandMonitor?
+    private var agentBridge: AgentBridge?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let music = MusicScripting()
@@ -65,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let signIn = SignInMonitor()
         let xcode = XcodeBuildMonitor()
         let terminal = TerminalCommandMonitor()
+        let claude = ClaudeCodeMonitor()
         self.xcode = xcode
         self.terminal = terminal
         notchController = NotchWindowController(
@@ -74,12 +79,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 battery: battery,
                 signIn: signIn,
                 xcode: xcode,
-                terminal: terminal
+                terminal: terminal,
+                claude: claude
             )
         )
         nowPlaying.start()
         battery.start()
         signIn.start()
+
+        // Hook events from Claude Code, by the agent they're for.
+        let bridge = AgentBridge { [weak claude] request in
+            guard request.path.hasPrefix("/claude/"), let claude else { return .empty }
+            return await claude.handle(request)
+        }
+        do {
+            try bridge.start()
+            agentBridge = bridge
+        } catch {
+            NSLog("MacCove couldn't open the agent socket: \(error)")
+        }
 
         // maccove:// URLs, from the scripts Xcode's Behaviors run and the
         // terminal hook. Handled here rather than through SwiftUI, which has

@@ -131,16 +131,16 @@ struct TerminalMinimalView: View {
     let notchSize: CGSize
 
     var body: some View {
-        TerminalGlyph(color: glyphColor(terminal.command), size: CompactLayout(notch: notchSize).artSize)
+        TerminalGlyph(color: glyphColor(terminal.command), size: BubbleLayout(notch: notchSize).artSize)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Terminal")
             .accessibilityAddTraits(.isButton)
     }
 }
 
-/// Opened up: the command, its folder and, while it runs, the time so far
-/// with Show in Terminal; once it's done, how long it took or its exit
-/// code, with Dismiss and Show in Terminal.
+/// Opened up; the glyph shows its terminal. The command, its folder and,
+/// while it runs, the time so far with Stop; once it's done, how long it
+/// took or its exit code, with Dismiss and Show in Terminal.
 struct TerminalExpandedView: View {
     let terminal: TerminalCommandMonitor
     let notchHeight: CGFloat
@@ -176,10 +176,18 @@ struct TerminalExpandedView: View {
 
     private func header(_ command: TerminalCommandMonitor.Command) -> some View {
         HStack(spacing: 12) {
-            // On a tile, green too once it's finished.
-            TerminalGlyph(color: command.phase == .finished ? .islandSucceeded : glyphColor(command), size: 26)
-                .frame(width: 44, height: 44)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.12)))
+            Button {
+                terminal.showInTerminal()
+            } label: {
+                // On a tile, green too once it's finished.
+                TerminalGlyph(color: command.phase == .finished ? .islandSucceeded : glyphColor(command), size: 26)
+                    .frame(width: 44, height: 44)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.12)))
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show in Terminal")
+
             VStack(alignment: .leading, spacing: 0) {
                 Text(command.text)
                     .font(.system(size: 15, weight: .semibold))
@@ -201,17 +209,17 @@ struct TerminalExpandedView: View {
                         .tracking(-0.5)
                 }
                 Button {
-                    terminal.showInTerminal()
+                    terminal.stop()
                 } label: {
-                    Image(systemName: "arrow.up.forward.app")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.islandError)
                         .frame(width: 44, height: 44)
-                        .background(Circle().fill(.white.opacity(0.14)))
+                        .background(Circle().fill(Color.islandError.opacity(0.18)))
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Show in Terminal")
+                .accessibilityLabel("Stop")
             }
         }
         .frame(height: Self.headerHeight)

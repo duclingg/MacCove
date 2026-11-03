@@ -22,10 +22,64 @@ enum TerminalWindow {
         NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration(), completionHandler: nil)
     }
 
-    private static func script(for appBundleIdentifier: String, tty: String) -> String? {
-        let quoted = tty
+    /// Presses Esc in the terminal a command runs in, as if typed there.
+    /// iTerm takes it over Apple Events without coming forward; any other
+    /// app is brought forward and sent the key, which needs Accessibility
+    /// access. Returns false when it couldn't be sent: the window is still
+    /// brought forward, so Esc can be pressed there.
+    @discardableResult
+    static func pressEscape(appBundleIdentifier: String?, tty: String?) -> Bool {
+        guard let appBundleIdentifier else { return false }
+        if appBundleIdentifier == iTerm, let tty,
+           !NSRunningApplication.runningApplications(withBundleIdentifier: iTerm).isEmpty {
+            var error: NSDictionary?
+            let sent = NSAppleScript(source: escapeScript(tty: tty))?.executeAndReturnError(&error)
+            if error == nil, sent?.booleanValue == true { return true }
+        }
+        bringForward(appBundleIdentifier: appBundleIdentifier, tty: tty)
+        guard CGPreflightPostEventAccess() else {
+            CGRequestPostEventAccess()
+            return false
+        }
+        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: appBundleIdentifier).first?.processIdentifier else {
+            return false
+        }
+        // Once the window has come forward.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            let escape: CGKeyCode = 53 // kVK_Escape
+            for isDown in [true, false] {
+                CGEvent(keyboardEventSource: nil, virtualKey: escape, keyDown: isDown)?.postToPid(pid)
+            }
+        }
+        return true
+    }
+
+    private static func escapeScript(tty: String) -> String {
+        """
+        tell application id "\(iTerm)"
+            repeat with aWindow in windows
+                repeat with aTab in tabs of aWindow
+                    repeat with aSession in sessions of aTab
+                        if tty of aSession is "\(quote(tty))" then
+                            tell aSession to write text (character id 27) newline no
+                            return true
+                        end if
+                    end repeat
+                end repeat
+            end repeat
+            return false
+        end tell
+        """
+    }
+
+    private static func quote(_ text: String) -> String {
+        text
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    private static func script(for appBundleIdentifier: String, tty: String) -> String? {
+        let quoted = quote(tty)
         switch appBundleIdentifier {
         case terminal:
             return """
