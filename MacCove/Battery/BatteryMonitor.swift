@@ -36,6 +36,11 @@ final class BatteryMonitor {
     @ObservationIgnored private var powerStateObserver: NSObjectProtocol?
     @ObservationIgnored private var isChangingLowPowerMode = false
     @ObservationIgnored private let helper = LowPowerModeHelperClient()
+    #if DEBUG
+    /// A preview battery flips Low Power Mode itself instead of asking the
+    /// helper.
+    @ObservationIgnored private var isPreview = false
+    #endif
 
     func start() {
         refresh(announce: false)
@@ -63,6 +68,12 @@ final class BatteryMonitor {
     /// Only root can change Low Power Mode, so MacCoveHelper does it. The
     /// change itself arrives through the usual notification.
     func setLowPowerMode(_ enabled: Bool) {
+        #if DEBUG
+        if isPreview {
+            isLowPowerMode = enabled
+            return
+        }
+        #endif
         guard !isChangingLowPowerMode else { return }
         isChangingLowPowerMode = true
         Task {
@@ -125,3 +136,30 @@ final class BatteryMonitor {
         return minutes
     }
 }
+
+#if DEBUG
+extension BatteryMonitor {
+    /// A battery that stays as given, for SwiftUI previews. Clicking Low
+    /// Power Mode still flips it, so the animations can be tried.
+    static func preview(
+        level: Int,
+        isPluggedIn: Bool = false,
+        isLowPowerMode: Bool = false,
+        minutesToFull: Int? = nil,
+        minutesToEmpty: Int? = nil,
+        adapterWatts: Int? = nil
+    ) -> BatteryMonitor {
+        let monitor = BatteryMonitor()
+        monitor.isPreview = true
+        monitor.hasBattery = true
+        monitor.level = level
+        monitor.isPluggedIn = isPluggedIn
+        monitor.isCharging = isPluggedIn && level < 100
+        monitor.isLowPowerMode = isLowPowerMode
+        monitor.minutesToFull = minutesToFull
+        monitor.minutesToEmpty = minutesToEmpty
+        monitor.adapterWatts = adapterWatts
+        return monitor
+    }
+}
+#endif

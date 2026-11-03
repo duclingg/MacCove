@@ -173,8 +173,8 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				C0FE00172ED7A00100A1B2C3 /* MacCoveHelper */,
 				C0FE00162ED7A00100A1B2C3 /* Shared */,
+				C0FE00172ED7A00100A1B2C3 /* MacCoveHelper */,
 			);
 			name = MacCoveHelper;
 			packageProductDependencies = (

@@ -228,21 +228,29 @@ private struct LowPowerModeButton: View {
     }
 }
 
-/// The ring around the level that invites a click: a capsule 27 by 32pt,
-/// breathing in and out.
+/// The ring around the level that invites a click: a capsule 27 by 32pt
+/// that appears in place at full size, then breathes in and out once the
+/// alert has settled, so it never drifts into position mid-breath.
 private struct BreathingRing: View {
     let color: Color
+
+    /// About as long as the island takes to open and its content to fade in.
+    private static let settle: Duration = .milliseconds(500)
+
+    @State private var isIn = false
 
     var body: some View {
         Capsule()
             .strokeBorder(color, lineWidth: 1.67)
             .frame(width: 27.17, height: 32.17)
-            .phaseAnimator([false, true]) { ring, isOut in
-                ring
-                    .scaleEffect(isOut ? 1 : 0.88)
-                    .opacity(isOut ? 1 : 0.6)
-            } animation: { _ in
-                .easeInOut(duration: 0.9)
+            .scaleEffect(isIn ? 0.88 : 1)
+            .opacity(isIn ? 0.6 : 1)
+            .task {
+                try? await Task.sleep(for: Self.settle)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    isIn = true
+                }
             }
     }
 }

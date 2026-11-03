@@ -50,6 +50,10 @@ final class NowPlayingModel {
     @ObservationIgnored private let controller = MediaController()
     @ObservationIgnored private let music: MusicScripting
     @ObservationIgnored private var artworkTask: Task<Void, Never>?
+    #if DEBUG
+    /// A preview model plays along by itself instead of driving the player.
+    @ObservationIgnored private var isPreview = false
+    #endif
 
     init(music: MusicScripting) {
         self.music = music
@@ -111,7 +115,7 @@ final class NowPlayingModel {
     /// Re-measures `positionCorrection` against Music's playhead. Called while
     /// the player is on screen; does nothing for other apps.
     func syncPositionWithPlayer() async {
-        guard track?.bundleIdentifier == MusicScripting.bundleIdentifier, let id = track?.id else { return }
+        guard drivesPlayer, track?.bundleIdentifier == MusicScripting.bundleIdentifier, let id = track?.id else { return }
         let sent = Date()
         guard let position = await music.playerPosition() else { return }
         let received = Date()
@@ -128,37 +132,43 @@ final class NowPlayingModel {
     func togglePlayPause() {
         reanchor(at: elapsed(at: Date()))
         setPlaying(!isPlaying)
+        guard drivesPlayer else { return }
         controller.togglePlayPause()
     }
 
     func nextTrack() {
+        guard drivesPlayer else { return }
         controller.nextTrack()
     }
 
     func previousTrack() {
+        guard drivesPlayer else { return }
         controller.previousTrack()
     }
 
     func seek(to time: TimeInterval) {
         reanchor(at: time)
+        guard drivesPlayer else { return }
         controller.setTime(seconds: time)
     }
 
     func skipBackward() {
         reanchor(at: max(elapsed(at: Date()) - 15, 0))
+        guard drivesPlayer else { return }
         controller.goBackFifteenSeconds()
     }
 
     func skipForward() {
         let ahead = elapsed(at: Date()) + 15
         reanchor(at: duration > 0 ? min(ahead, duration) : ahead)
+        guard drivesPlayer else { return }
         controller.skipFifteenSeconds()
     }
 
     /// Brings the app that's playing to the front, like tapping the
     /// iPhone's player. For a browser that's the browser, not the tab.
     func openSourceApp() {
-        guard let bundleIdentifier = track?.bundleIdentifier else { return }
+        guard drivesPlayer, let bundleIdentifier = track?.bundleIdentifier else { return }
         if let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first {
             running.activate()
         } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
@@ -168,6 +178,7 @@ final class NowPlayingModel {
 
     /// Asks the playing app whether the current track is saved.
     func refreshFavorite() async {
+        guard drivesPlayer else { return }
         guard favoriteStyle == .star, let id = track?.id else {
             isFavorite = nil
             return
@@ -181,6 +192,7 @@ final class NowPlayingModel {
         guard favoriteStyle == .star, let id = track?.id else { return }
         let target = !(isFavorite ?? false)
         isFavorite = target
+        guard drivesPlayer else { return }
         Task {
             let accepted = await music.setFavorited(target)
             if !accepted, track?.id == id {
@@ -190,6 +202,15 @@ final class NowPlayingModel {
     }
 
     // MARK: - Updates
+
+    /// False for a preview model, which only changes its own state.
+    private var drivesPlayer: Bool {
+        #if DEBUG
+        !isPreview
+        #else
+        true
+        #endif
+    }
 
     private func restartListening() {
         Task { [weak self] in
@@ -286,3 +307,42 @@ final class NowPlayingModel {
         tint = .white
     }
 }
+
+#if DEBUG
+extension NowPlayingModel {
+    /// A track that plays along without any player, for SwiftUI previews.
+    /// Play, pause, seek, skip and Favorite all work on its own state.
+    static func preview(
+        title: String,
+        artist: String,
+        album: String = "",
+        app bundleIdentifier: String = "com.spotify.client",
+        isExplicit: Bool = false,
+        isPlaying: Bool = true,
+        elapsed: TimeInterval = 84,
+        duration: TimeInterval = 228,
+        isFavorite: Bool? = nil,
+        artwork: NSImage? = nil,
+        tint: Color = .white
+    ) -> NowPlayingModel {
+        let model = NowPlayingModel(music: MusicScripting())
+        model.isPreview = true
+        model.track = Track(
+            id: "\(bundleIdentifier)/\(title)",
+            title: title,
+            artist: artist,
+            album: album,
+            bundleIdentifier: bundleIdentifier,
+            isExplicit: isExplicit
+        )
+        model.isPlaying = isPlaying
+        model.duration = duration
+        model.elapsedAnchor = elapsed
+        model.anchorDate = Date()
+        model.isFavorite = isFavorite
+        model.artwork = artwork
+        model.tint = tint
+        return model
+    }
+}
+#endif
