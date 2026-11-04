@@ -62,7 +62,8 @@ final class MenuBarItem {
         isShown = item.isVisible
 
         // ⌘-dragged off, or hidden some other way.
-        visibilityObservation = item.observe(\.isVisible, options: [.new]) { [weak self] _, change in
+        // Not necessarily on the main thread, so it goes there.
+        visibilityObservation = item.observe(\.isVisible, options: [.new]) { @Sendable [weak self] _, change in
             guard let shown = change.newValue, let self else { return }
             Task { @MainActor in
                 self.visibilityChanged(shown)

@@ -199,12 +199,14 @@ final class AirPodsMonitor {
 
     // MARK: - Connecting
 
-    fileprivate func deviceConnected(_ device: IOBluetoothDevice) {
+    /// By address, since the device itself is IOBluetooth's to use on the
+    /// queue it called back on.
+    fileprivate func deviceConnected(address: String) {
+        guard let device = IOBluetoothDevice(addressString: address) else { return }
         add(device, announce: true)
     }
 
-    fileprivate func deviceDisconnected(_ device: IOBluetoothDevice) {
-        guard let address = device.addressString else { return }
+    fileprivate func deviceDisconnected(address: String) {
         disconnectNotifications.removeValue(forKey: address)?.unregister()
         connected.removeAll { $0.id == address }
         devicesChanged()
@@ -338,12 +340,21 @@ final class AirPodsMonitor {
 private final class BluetoothBridge: NSObject, CBCentralManagerDelegate {
     weak var monitor: AirPodsMonitor?
 
-    @objc func deviceConnected(_ notification: IOBluetoothUserNotification, device: IOBluetoothDevice) {
-        monitor?.deviceConnected(device)
+    // IOBluetooth calls these on a Core Bluetooth queue, not the main
+    // one, so they take the address there and carry on on the main actor.
+
+    @objc nonisolated func deviceConnected(_ notification: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        guard let address = device.addressString else { return }
+        Task { @MainActor in
+            self.monitor?.deviceConnected(address: address)
+        }
     }
 
-    @objc func deviceDisconnected(_ notification: IOBluetoothUserNotification, device: IOBluetoothDevice) {
-        monitor?.deviceDisconnected(device)
+    @objc nonisolated func deviceDisconnected(_ notification: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        guard let address = device.addressString else { return }
+        Task { @MainActor in
+            self.monitor?.deviceDisconnected(address: address)
+        }
     }
 
     /// Bluetooth access answered, at the prompt or already.
