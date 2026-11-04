@@ -112,6 +112,10 @@ final class GitHubMonitor {
     /// newest again, when a later one is dismissed on GitHub, isn't new.
     @ObservationIgnored private var seenReviewIDs: Set<String> = []
     @ObservationIgnored private var hasBaseline = false
+    /// When the first poll came back. A pull request that turns up later
+    /// but hasn't changed since, such as an old one that moves into the
+    /// ten most recent when a newer one is merged, has nothing new to say.
+    @ObservationIgnored private var watchingSince: Date?
     /// Takes away a passed result after a moment.
     @ObservationIgnored private var passedDismissal: Task<Void, Never>?
     @ObservationIgnored private var duePassedKey: String?
@@ -158,6 +162,7 @@ final class GitHubMonitor {
         changedAt = [:]
         dismissed = []
         seenReviewIDs = []
+        watchingSince = nil
         branchRules = [:]
         branchRulesFetchedAt = [:]
         hasBaseline = false
@@ -311,14 +316,18 @@ final class GitHubMonitor {
     private func apply(_ snapshot: GitHubSnapshot) {
         latest = snapshot
         login = snapshot.login
-        // New commits since MacCove started are expecting checks.
+        let watchingSince = self.watchingSince ?? .now
+        self.watchingSince = watchingSince
+        // New commits since MacCove started are expecting checks. A pull
+        // request that only now turns up is, if it changed since then.
         var heads: [String: (sha: String, seenAt: Date)] = [:]
         for pullRequest in snapshot.authored {
             guard let sha = pullRequest.headSHA else { continue }
-            if let known = self.heads[pullRequest.id], known.sha == sha {
-                heads[pullRequest.id] = known
+            if let known = self.heads[pullRequest.id] {
+                heads[pullRequest.id] = known.sha == sha ? known : (sha, .now)
             } else {
-                heads[pullRequest.id] = (sha, hasBaseline ? .now : .distantPast)
+                let isFresh = hasBaseline && Self.hasChanged(pullRequest, since: watchingSince)
+                heads[pullRequest.id] = (sha, isFresh ? .now : .distantPast)
             }
         }
         self.heads = heads
@@ -327,10 +336,15 @@ final class GitHubMonitor {
             let key = activity.key
             seen.insert(activity.id)
             guard lastKeys[activity.id] != key else { continue }
+            let isNewlyListed = lastKeys[activity.id] == nil
             lastKeys[activity.id] = key
             changedAt[activity.id] = .now
             if !hasBaseline, activity.phase != .running {
                 // Already like this when MacCove started.
+                dismissed.insert(key)
+            } else if isNewlyListed, activity.phase != .running, !Self.hasChanged(activity, since: watchingSince) {
+                // Only now in the list, and like this since before MacCove
+                // started. Checks running are news whenever they're seen.
                 dismissed.insert(key)
             } else if let review = activity.review, seenReviewIDs.contains(review.id) {
                 dismissed.insert(key)
@@ -345,10 +359,31 @@ final class GitHubMonitor {
             lastKeys[id] = nil
             changedAt[id] = nil
         }
+        // A pull request's dismissed states go once it moves on, so the
+        // same failure after a re-run shows again. Those of pull requests
+        // that dropped off the list stay, in case they come back.
         let current = Set(lastKeys.values)
-        dismissed.formIntersection(current)
+        let listed = Set(lastKeys.keys)
+        dismissed = dismissed.filter { key in
+            current.contains(key) || !listed.contains { key.hasPrefix($0 + "@") }
+        }
         hasBaseline = true
         update()
+    }
+
+    /// Whether anything happened to it after `date`. Without a date to go
+    /// on, it's taken as new.
+    private static func hasChanged(_ pullRequest: GitHubPullRequest, since date: Date) -> Bool {
+        guard let updatedAt = pullRequest.updatedAt else { return true }
+        return updatedAt > date
+    }
+
+    /// A review by when it was left; anything else by its pull request.
+    private static func hasChanged(_ activity: Activity, since date: Date) -> Bool {
+        if let submittedAt = activity.review?.submittedAt {
+            return submittedAt > date
+        }
+        return hasChanged(activity.pullRequest, since: date)
     }
 
     /// An approval that makes a pull request ready to merge is said by

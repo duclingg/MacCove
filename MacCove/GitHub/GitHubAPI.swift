@@ -73,6 +73,9 @@ nonisolated struct GitHubPullRequest: Equatable, Identifiable, Sendable {
     let baseBranch: String
     /// The last few reviews, oldest first; only for your own.
     var reviews: [Review] = []
+    /// When anything about it last changed: a push, a comment, a review,
+    /// a reviewer asked for.
+    var updatedAt: Date?
 
     /// "MacCove", without the owner.
     var repositoryName: String {
@@ -291,7 +294,7 @@ nonisolated struct GitHubAPI: Sendable {
         }
 
         fragment Basics on PullRequest {
-          id number title url isDraft additions deletions changedFiles
+          id number title url isDraft additions deletions changedFiles updatedAt
           baseRefName
           repository {
             nameWithOwner viewerPermission viewerDefaultMergeMethod
@@ -534,6 +537,7 @@ nonisolated private struct PullRequestNode: Decodable {
     let additions: Int?
     let deletions: Int?
     let changedFiles: Int?
+    let updatedAt: Date?
     let repository: Repository?
     let baseRefName: String?
     let reviewDecision: String?
@@ -570,7 +574,8 @@ nonisolated private struct PullRequestNode: Decodable {
             mergeMethods: mergeMethods,
             defaultMergeMethod: repository.viewerDefaultMergeMethod.flatMap(GitHubMergeMethod.init),
             baseBranch: baseRefName ?? "",
-            reviews: reviews?.nodes.compactMap { $0?.review } ?? []
+            reviews: reviews?.nodes.compactMap { $0?.review } ?? [],
+            updatedAt: updatedAt
         )
     }
 }
