@@ -1,3 +1,10 @@
+//
+//  NSScreen+Notch.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import AppKit
 
 extension NSScreen {
@@ -10,6 +17,23 @@ extension NSScreen {
 
     var hasNotch: Bool {
         safeAreaInsets.top > 0
+    }
+
+    /// The display's ID, which stays the same while it's connected; the
+    /// `NSScreen` itself can be replaced when displays change.
+    var displayID: CGDirectDisplayID? {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+    }
+
+    /// The Mac's own display, rather than one plugged in.
+    var isBuiltIn: Bool {
+        displayID.map { CGDisplayIsBuiltin($0) != 0 } ?? false
+    }
+
+    /// The display the pointer is on.
+    static var withPointer: NSScreen? {
+        let mouse = NSEvent.mouseLocation
+        return screens.first { NSMouseInRect(mouse, $0.frame, false) }
     }
 
     /// The middle of the island on screens without a notch. There's no camera

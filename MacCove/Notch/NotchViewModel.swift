@@ -1,3 +1,10 @@
+//
+//  NotchViewModel.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import SwiftUI
 
 enum IslandState {
@@ -119,7 +126,13 @@ final class NotchViewModel {
     private var isRevealedByHover = false
     /// A full-screen app is in front on this display: the island steps
     /// aside, as on the iPhone.
-    private var isFullScreenActive = false
+    /// The app in front is full screen on this display.
+    private var isFrontAppFullScreen = false
+    /// The front app's full screen hides the notch, unless General says
+    /// otherwise.
+    private var isFullScreenActive: Bool {
+        isFrontAppFullScreen && hidesInFullScreen
+    }
     private var isSigningIn = false
     /// The charging pill or the low battery alert, until it times out.
     private var batteryAlert: IslandActivity?
@@ -127,8 +140,35 @@ final class NotchViewModel {
     /// closes, so the next click on them reaches the one after it. Something
     /// new starting puts everything back in order.
     private var promotedActivity: IslandActivity?
+    /// Swiped into the notch, as on the iPhone: still running, but out of
+    /// sight until swiped back out or until it has something new to show.
+    /// The latest last.
+    private var hiddenActivities: [IslandActivity] = []
+
+    /// The app in front, and in Terminal or iTerm the terminal device of
+    /// the tab in front. An activity steps out of the notch while what it
+    /// comes from is in front, as on the iPhone while you're in the app,
+    /// and comes back when you switch away.
+    struct FrontApp: Equatable {
+        var bundleIdentifier: String?
+        var tty: String?
+    }
+
+    var frontApp: FrontApp?
 
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
+    /// Opening after the cursor has rested on the notch for a moment.
+    @ObservationIgnored private var hoverOpenTask: Task<Void, Never>?
+
+    // General's settings, read again whenever they change.
+    /// At most this many shown on their own.
+    private(set) var maxActivities = NotchSettings.maxActivities
+    private var hidesInFullScreen = NotchSettings.hidesInFullScreen
+    private var noNotchVisibility = NotchSettings.noNotchVisibility
+    private var showsHandleSetting = NotchSettings.showsHandle
+    @ObservationIgnored private var opening = NotchSettings.opening
+    @ObservationIgnored private var hasTrackpadFeedback = NotchSettings.hasTrackpadFeedback
+    @ObservationIgnored private var settingsObserver: NSObjectProtocol?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
     @ObservationIgnored private var alertTask: Task<Void, Never>?
     /// Closes a failure, or the clipboard history from the menu bar, that
@@ -203,25 +243,54 @@ final class NotchViewModel {
             guard let self else { return false }
             return self.isHovering || self.presentation == .expanded
         }
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.readSettings() }
+        }
     }
 
-    /// Most shown on their own: one in the island and two in bubbles. The
-    /// rest stack up as mini icons in the right bubble.
-    static let maxActivities = 3
+    /// General's settings, as they change in Settings.
+    private func readSettings() {
+        opening = NotchSettings.opening
+        hasTrackpadFeedback = NotchSettings.hasTrackpadFeedback
+        if maxActivities != NotchSettings.maxActivities {
+            maxActivities = NotchSettings.maxActivities
+        }
+        if noNotchVisibility != NotchSettings.noNotchVisibility {
+            noNotchVisibility = NotchSettings.noNotchVisibility
+        }
+        if showsHandleSetting != NotchSettings.showsHandle {
+            showsHandleSetting = NotchSettings.showsHandle
+        }
+        if hidesInFullScreen != NotchSettings.hidesInFullScreen {
+            let wasActive = isFullScreenActive
+            hidesInFullScreen = NotchSettings.hidesInFullScreen
+            if isFullScreenActive, !wasActive {
+                fullScreenBecameActive()
+            }
+        }
+    }
 
     /// What's shown on its own, the island's first and the rest for the
     /// bubbles.
     var activities: [IslandActivity] {
-        Array(runningActivities.prefix(Self.maxActivities))
+        Array(runningActivities.prefix(maxActivities))
     }
 
     /// Running past those, stacked as mini icons in the right bubble.
     var overflowActivities: [IslandActivity] {
-        Array(runningActivities.dropFirst(Self.maxActivities))
+        Array(runningActivities.dropFirst(maxActivities))
     }
 
-    /// Everything running, in order.
+    /// Everything running, in order, but what's been swiped away.
     private var runningActivities: [IslandActivity] {
+        runningActivities(includingHidden: false)
+    }
+
+    private func runningActivities(includingHidden: Bool) -> [IslandActivity] {
         // A full-screen app hides everything but the lock screen, unless the
         // island was brought back on purpose.
         let isShowingAll = !isFullScreenActive || isRevealedByHover
@@ -265,7 +334,10 @@ final class NotchViewModel {
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
         }
-        if running.count > Self.maxActivities, let promotedActivity,
+        if !includingHidden {
+            running.removeAll { hiddenActivities.contains($0) || isInFront($0) }
+        }
+        if running.count > maxActivities, let promotedActivity,
            let index = running.firstIndex(of: promotedActivity), index > 1 {
             running.insert(running.remove(at: index), at: 1)
         }
@@ -300,9 +372,14 @@ final class NotchViewModel {
 
     /// Without a camera housing to hide behind, an idle island would be a
     /// floating black pill, so it slides up off the top of the screen
-    /// instead.
+    /// instead, unless Displays says to keep it there always.
     var isTuckedAway: Bool {
-        state == .idle && !hasPhysicalNotch
+        state == .idle && !hasPhysicalNotch && noNotchVisibility != .always
+    }
+
+    /// A small bar at the top edge, marking where the tucked-away island is.
+    var showsHandle: Bool {
+        isTuckedAway && showsHandleSetting
     }
 
     /// Whether the hover strip has anything to bring back: the island is
@@ -452,6 +529,9 @@ final class NotchViewModel {
     /// Height of the invisible strip along the top edge that brings a
     /// tucked-away island back on screens without a notch.
     static let hoverStripHeight: CGFloat = 5
+    /// How far a drag or two fingers go sideways before it counts as a
+    /// swipe.
+    static let swipeDistance: CGFloat = 36
     /// The hardware notch's bottom corners, by eye: macOS doesn't say. Every
     /// shape uses it, so the pill, the bubbles and the open island all
     /// round off like the notch they grow out of.
@@ -542,8 +622,102 @@ final class NotchViewModel {
         }
         collapseTask?.cancel()
         alertTask?.cancel()
+        hoverOpenTask?.cancel()
+        // A tap on the trackpad as it opens, not again for a switch
+        // between activities while it's open.
+        if presentation != .expanded, hasTrackpadFeedback {
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+        }
         expandedActivity = activity
         presentation = .expanded
+    }
+
+    /// Opens what's under the cursor, straight away or after a pause, when
+    /// General says the notch opens on hover.
+    private func openOnHoverIfNeeded() {
+        hoverOpenTask?.cancel()
+        guard presentation == .compact, let activity = hovered else { return }
+        switch opening {
+        case .whenClicked:
+            break
+        case .hovered:
+            expand(activity)
+        case .shortPause:
+            hoverOpenTask = Task { [weak self] in
+                try? await Task.sleep(for: NotchSettings.openingPause)
+                guard !Task.isCancelled, let self, self.presentation == .compact, let hovered = self.hovered else { return }
+                self.expand(hovered)
+            }
+        }
+    }
+
+    /// A swipe on the pill or a bubble, or on the notch with nothing
+    /// showing, `nil` then. In toward the camera tucks that activity
+    /// away, as on the iPhone; out from it brings back the last one
+    /// tucked away. Only while closed, and never the lock screen, a
+    /// battery alert or an agent waiting for your answer.
+    func swipe(_ activity: IslandActivity?, inward: Bool) {
+        // Behind a full-screen app nothing shows, so everything would look
+        // ended and come back.
+        guard state != .expanded, !isFullScreenActive || isRevealedByHover else { return }
+        let running = runningActivities(includingHidden: true)
+        // Ones that have since ended have nothing to come back to.
+        hiddenActivities.removeAll { !running.contains($0) }
+        if inward {
+            guard let activity, canHide(activity), running.contains(activity) else { return }
+            hiddenActivities.removeAll { $0 == activity }
+            hiddenActivities.append(activity)
+            if promotedActivity == activity {
+                promotedActivity = nil
+            }
+            if hovered == activity {
+                setHovering(nil)
+            }
+        } else if !hiddenActivities.isEmpty {
+            hiddenActivities.removeLast()
+        }
+    }
+
+    private func canHide(_ activity: IslandActivity) -> Bool {
+        switch activity {
+        case .signIn, .charging, .lowBattery: false
+        case .claudeCode: !claude.needsAnswer
+        case .xcode, .terminal, .github, .clipboard, .calendar, .nowPlaying: true
+        }
+    }
+
+    /// Whether what the activity comes from is in front: Xcode, Calendar,
+    /// the app playing, or the terminal tab a command or Claude Code runs
+    /// in. Any tab of that terminal when it can't say which. An agent
+    /// waiting for your answer stays, since its buttons answer it.
+    private func isInFront(_ activity: IslandActivity) -> Bool {
+        guard let front = frontApp, let frontID = front.bundleIdentifier else { return false }
+        func isFront(_ app: String?, tty: String?) -> Bool {
+            guard app == frontID else { return false }
+            guard let tty, let frontTTY = front.tty else { return true }
+            return tty == frontTTY
+        }
+        switch activity {
+        case .xcode: return frontID == XcodeScripting.bundleIdentifier
+        case .terminal: return isFront(terminal.command?.appBundleIdentifier, tty: terminal.command?.tty)
+        case .claudeCode: return !claude.needsAnswer && isFront(claude.session?.appBundleIdentifier, tty: claude.session?.tty)
+        case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
+        case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
+        case .github, .clipboard, .signIn, .charging, .lowBattery: return false
+        }
+    }
+
+    /// Whether a command or Claude Code runs in the app in front with a
+    /// known tab, so it's worth asking which tab is in front.
+    var wantsFrontTab: Bool {
+        guard let frontID = frontApp?.bundleIdentifier else { return false }
+        return (terminal.command?.appBundleIdentifier == frontID && terminal.command?.tty != nil)
+            || (claude.session?.appBundleIdentifier == frontID && claude.session?.tty != nil)
+    }
+
+    /// Something new to show brings a tucked-away activity back.
+    private func unhide(_ activity: IslandActivity) {
+        hiddenActivities.removeAll { $0 == activity }
     }
 
     /// The island or bubble under the cursor, `nil` for neither.
@@ -560,7 +734,11 @@ final class NotchViewModel {
             // A failure that opened by itself stays open while the cursor
             // is on it, then closes like anything else.
             failureCollapseTask?.cancel()
-        } else if presentation == .compact {
+            openOnHoverIfNeeded()
+        } else {
+            hoverOpenTask?.cancel()
+        }
+        if !isHovering, presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
             terminal.leaveIfDue(after: .seconds(1.2))
             github.leaveIfDue(after: .seconds(1.2))
@@ -577,13 +755,18 @@ final class NotchViewModel {
     /// Entering full screen closes the player too, so it doesn't come back
     /// expanded when you leave.
     func setFullScreenActive(_ active: Bool) {
-        guard active != isFullScreenActive else { return }
-        isFullScreenActive = active
-        if active {
-            collapseTask?.cancel()
-            presentation = .compact
-            isRevealedByHover = false
+        guard active != isFrontAppFullScreen else { return }
+        let wasActive = isFullScreenActive
+        isFrontAppFullScreen = active
+        if isFullScreenActive, !wasActive {
+            fullScreenBecameActive()
         }
+    }
+
+    private func fullScreenBecameActive() {
+        collapseTask?.cancel()
+        presentation = .compact
+        isRevealedByHover = false
     }
 
     /// The cursor reached the hover strip: slide the island down under it.
@@ -716,8 +899,8 @@ final class NotchViewModel {
         }
     }
 
-    /// From the menu bar: the rest of the day, opened and then closed the
-    /// way the clipboard history is.
+    /// From Settings › Activities: the rest of the day, opened and then
+    /// closed the way the clipboard history is.
     func showTodayEvents() {
         guard !isSigningIn, batteryAlert == nil else { return }
         calendar.showToday()
@@ -734,9 +917,9 @@ final class NotchViewModel {
         }
     }
 
-    /// From the menu bar: opens the history over whatever else is open,
-    /// then shrinks back to the pill after a while if the cursor never
-    /// comes, and leaves.
+    /// From Settings › Activities: opens the history over whatever else is
+    /// open, then shrinks back to the pill after a while if the cursor
+    /// never comes, and leaves.
     func showClipboardHistory() {
         guard !isSigningIn, batteryAlert == nil else { return }
         clipboard.showHistory()
@@ -757,6 +940,7 @@ final class NotchViewModel {
     /// does on the iPhone. Only the lock screen and a battery alert come
     /// first.
     private func activityNeedsAnswer(_ activity: IslandActivity) {
+        unhide(activity)
         guard !isSigningIn, batteryAlert == nil else { return }
         collapseTask?.cancel()
         failureCollapseTask?.cancel()
@@ -778,6 +962,7 @@ final class NotchViewModel {
     /// A failure left open gives way to whatever its activity starts next,
     /// unless the cursor is on it.
     private func activityStarted(_ activity: IslandActivity) {
+        unhide(activity)
         promotedActivity = nil
         guard expandedActivity == activity else { return }
         failureCollapseTask?.cancel()
@@ -790,6 +975,7 @@ final class NotchViewModel {
     /// keeping out of the way, then shrinks back to the pill after a while
     /// if the cursor never comes.
     private func activityFailed(_ activity: IslandActivity) {
+        unhide(activity)
         let isShowingAll = !isFullScreenActive || isRevealedByHover
         let isOtherOpen = presentation == .expanded && expandedActivity != activity
         guard !isSigningIn, batteryAlert == nil, isShowingAll, !isOtherOpen else { return }
@@ -807,6 +993,7 @@ final class NotchViewModel {
 
     /// Dismissed from its own buttons: nothing is left to keep open.
     private func activityEnded(_ activity: IslandActivity) {
+        unhide(activity)
         guard expandedActivity == activity else { return }
         failureCollapseTask?.cancel()
         collapseTask?.cancel()

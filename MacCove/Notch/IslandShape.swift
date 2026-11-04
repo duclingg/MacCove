@@ -1,3 +1,10 @@
+//
+//  IslandShape.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import SwiftUI
 
 /// The island's silhouette: square along the top edge of the screen, rounded

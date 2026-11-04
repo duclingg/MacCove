@@ -1,3 +1,10 @@
+//
+//  AppIcon.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import SwiftUI
 
 extension ShapeStyle where Self == Color {

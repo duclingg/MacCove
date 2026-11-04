@@ -1,3 +1,10 @@
+//
+//  IslandView.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import SwiftUI
 
 /// The island itself. The black silhouette springs between sizes while the
@@ -9,6 +16,8 @@ struct IslandView: View {
     /// Extra distance past the top edge when tucked away, enough to clear
     /// the few points the island grows on hover.
     private static let tuckClearance: CGFloat = 12
+    /// The bar marking a tucked-away island, on displays without a notch.
+    private static let handleSize = CGSize(width: 44, height: 5)
     fileprivate static let topBleed: CGFloat = 8
 
     var body: some View {
@@ -39,6 +48,18 @@ struct IslandView: View {
                         viewModel.expand()
                     }
                 }
+                // Dragging across it with the mouse swipes it, as two fingers
+                // on the trackpad do: toward the centre line from where the
+                // drag started tucks it away, away from it brings one back.
+                .gesture(
+                    DragGesture(minimumDistance: 12).onEnded { value in
+                        guard let fingersX = swipeDistance(value) else { return }
+                        let startOffset = value.startLocation.x - geometry.size.width / 2
+                        let inward = startOffset == 0 || (fingersX < 0) == (startOffset > 0)
+                        viewModel.swipe(viewModel.primaryActivity, inward: inward)
+                    },
+                    including: viewModel.state == .compact ? .all : .subviews
+                )
 
             ForEach(bubbles) { bubble in
                 IslandBubbleView(bubble: bubble, viewModel: viewModel)
@@ -53,6 +74,20 @@ struct IslandView: View {
         .offset(y: viewModel.isTuckedAway ? -(viewModel.notchSize.height + Self.tuckClearance) : 0)
         .animation(.islandSlide, value: viewModel.isTuckedAway)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Where the island is while it's tucked away, when Displays asks
+        // for it. Outside the slide, so it stays at the edge.
+        .overlay(alignment: .top) {
+            if viewModel.showsHandle {
+                Capsule()
+                    .fill(.white.opacity(0.35))
+                    .frame(width: Self.handleSize.width, height: Self.handleSize.height)
+                    .overlay(Capsule().strokeBorder(.black.opacity(0.25), lineWidth: 0.5))
+                    .padding(.top, 3)
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: viewModel.showsHandle)
         .animation(.island, value: geometry)
         .animation(.island, value: bubbles)
         .environment(\.colorScheme, .dark)
@@ -184,6 +219,13 @@ private struct IslandBubbleView: View {
                     .onTapGesture {
                         viewModel.expand(segment.activity)
                     }
+                    // Toward the island tucks it away; away from it brings
+                    // the last one back.
+                    .gesture(DragGesture(minimumDistance: 12).onEnded { value in
+                        guard let fingersX = swipeDistance(value) else { return }
+                        let inward = bubble.side == .trailing ? fingersX < 0 : fingersX > 0
+                        viewModel.swipe(segment.activity, inward: inward)
+                    })
                     .transition(.islandContent)
                 }
             }
@@ -247,6 +289,14 @@ private struct IslandBubbleView: View {
             EmptyView()
         }
     }
+}
+
+/// How far right a drag went, when it's far enough and mostly sideways to
+/// count as a swipe; `nil` otherwise.
+private func swipeDistance(_ value: DragGesture.Value) -> CGFloat? {
+    let x = value.translation.width
+    guard abs(x) >= NotchViewModel.swipeDistance, abs(x) > abs(value.translation.height) * 1.5 else { return nil }
+    return x
 }
 
 extension AnyTransition {
