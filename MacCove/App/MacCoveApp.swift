@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct MacCoveApp: App {
+    @Environment(\.openWindow) private var openWindow
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var launchAtLogin = LaunchAtLogin()
     /// Bubbles stay clear of the front app's menus, and Stop presses Esc,
@@ -15,11 +16,18 @@ struct MacCoveApp: App {
     @State private var isClipboardRestricted = ClipboardMonitor.isAccessRestricted
 
     /// Xcode runs the app to draw SwiftUI previews, which shouldn't add a
-    /// menu bar item each time.
-    private static let isRunningForPreviews = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    /// menu bar item each time. Previews in JIT mode set the playgrounds
+    /// variable instead of the previews one.
+    private static let isRunningForPreviews = ["XCODE_RUNNING_FOR_PREVIEWS", "XCODE_RUNNING_FOR_PLAYGROUNDS"]
+        .contains { ProcessInfo.processInfo.environment[$0] == "1" }
 
     var body: some Scene {
         MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled", isInserted: .constant(!Self.isRunningForPreviews)) {
+            Button("Settings", systemImage: "gear") {
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "settings-window")
+            }
+            
             Toggle("Launch at Login", isOn: Binding(
                 get: { launchAtLogin.isEnabled },
                 set: { launchAtLogin.setEnabled($0) }
@@ -88,6 +96,12 @@ struct MacCoveApp: App {
             }
             .keyboardShortcut("q")
         }
+        
+        Window("Settings", id: "settings-window") {
+            SettingsView()
+                .frame(width: 800, height: 600)
+        }
+        .windowResizability(.contentSize)
     }
 }
 
