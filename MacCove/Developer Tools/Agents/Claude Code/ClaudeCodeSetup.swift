@@ -15,7 +15,7 @@ import AppKit
 /// it reports. Most events run in the background and never hold Claude up;
 /// a permission request, a question or a finished plan waits for MacCove's
 /// answer.
-enum ClaudeCodeSetup {
+enum ClaudeCodeSetup: AgentSetupProtocol {
     /// Beside the Xcode scripts and the terminal hook. No spaces, so Claude
     /// Code can run it without a shell.
     static var scriptURL: URL {
@@ -57,73 +57,95 @@ enum ClaudeCodeSetup {
         Hook(event: "Stop"),
         Hook(event: "SessionEnd"),
     ]
-
-    static func showSetup() {
-        let settings: [String: Any]
+    
+    /// Writes the hook script and adds MacCove's hooks to Claude Code's
+    /// settings, or brings an earlier setup up to date with hooks added
+    /// since. The file is backed up first, and other hooks stay as they
+    /// are. Sessions started from then on use the hook.
+    static func setup() {
+        guard let settings = readSettingsOrSayWhy() else { return }
         do {
-            settings = try readSettings()
+            try writeScript()
+            let updated = adding(to: settings)
+            if !NSDictionary(dictionary: updated).isEqual(to: settings) {
+                try save(updated)
+            }
+        } catch {
+            NSApp.activate()
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    /// Takes MacCove's hooks back out of Claude Code's settings, leaving
+    /// the rest as it was. The script stays, so sessions that are already
+    /// open don't run into a missing command; it's rewritten first, so one
+    /// from an earlier Set Up also stops once the hooks are gone.
+    static func remove() {
+        guard let settings = readSettingsOrSayWhy() else { return }
+        let updated = removing(from: settings)
+        guard !NSDictionary(dictionary: updated).isEqual(to: settings) else { return }
+        do {
+            if FileManager.default.fileExists(atPath: scriptURL.path(percentEncoded: false)) {
+                try writeScript()
+            }
+            try save(updated)
+            // Nothing more comes from the sessions MacCove is showing, so
+            // they'd stay as they are.
+            NotificationCenter.default.post(name: .claudeCodeHooksRemoved, object: nil)
+        } catch {
+            NSApp.activate()
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    // MARK: - Claude Code itself
+
+    /// Where Claude Code's installers put the `claude` command: the native
+    /// installer, the older local install, and npm or Homebrew.
+    private static var commandURLs: [URL] {
+        [
+            URL.homeDirectory.appending(path: ".local/bin/claude"),
+            URL.homeDirectory.appending(path: ".claude/local/claude"),
+            URL(filePath: "/opt/homebrew/bin/claude"),
+            URL(filePath: "/usr/local/bin/claude"),
+        ]
+    }
+
+    /// Whether Claude Code is on this Mac: its `claude` command is in one
+    /// of the usual places. Hooks set up without it would never run.
+    static func isInstalled() -> Bool {
+        commandURLs.contains { FileManager.default.isExecutableFile(atPath: $0.path(percentEncoded: false)) }
+    }
+
+    // MARK: - Settings
+
+    /// Whether Claude Code runs MacCove's hook. Quietly `false` when its
+    /// settings can't be read, since this is asked every time the
+    /// settings pane draws; Set Up says what's wrong.
+    static func hooksSetup() -> Bool {
+        guard let settings = try? readSettings() else { return false }
+        let events = settings["hooks"] as? [String: Any] ?? [:]
+        return events.values.contains { groups in
+            (groups as? [[String: Any]] ?? []).contains { group in
+                (group["hooks"] as? [[String: Any]] ?? []).contains(where: isMacCoveHook)
+            }
+        }
+    }
+
+    /// Claude Code's settings, or `nil` once it has said they aren't valid
+    /// JSON, which MacCove won't overwrite.
+    private static func readSettingsOrSayWhy() -> [String: Any]? {
+        do {
+            return try readSettings()
         } catch {
             NSApp.activate()
             let alert = NSAlert()
             alert.messageText = "MacCove Couldn’t Read Claude Code’s Settings"
             alert.informativeText = "~/.claude/settings.json isn’t valid JSON, so MacCove left it alone. \(error.localizedDescription)"
             alert.runModal()
-            return
-        }
-        let isInstalled = Self.isInstalled(in: settings)
-
-        let alert = NSAlert()
-        alert.messageText = "Show Claude Code in MacCove"
-        if isInstalled {
-            alert.informativeText = """
-                Claude Code already runs MacCove’s hook. It has been brought up to date.
-
-                Removing it takes MacCove’s entries out of ~/.claude/settings.json and leaves your other hooks as they are.
-                """
-            alert.addButton(withTitle: "Done")
-            alert.addButton(withTitle: "Remove from Claude Code")
-        } else {
-            alert.informativeText = """
-                MacCove adds its hook to ~/.claude/settings.json, so the notch shows what each session is working on, \
-                asks you for permission, answers Claude’s questions and approves its plans, and shows when it’s done. \
-                Your other hooks stay as they are, and the file is backed up to settings.json.maccove-backup first.
-
-                Anything Claude asks waits for your answer in the notch; after 10 minutes without one, Claude Code asks \
-                in the terminal instead. Sessions started from now on use the hook.
-                """
-            alert.addButton(withTitle: "Add to Claude Code")
-            alert.addButton(withTitle: "Cancel")
-        }
-
-        do {
-            try writeScript()
-            // Hooks added since it was installed.
-            if isInstalled {
-                let updated = adding(to: settings)
-                if !NSDictionary(dictionary: updated).isEqual(to: settings) {
-                    try save(updated)
-                }
-            }
-        } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
-            return
-        }
-
-        NSApp.activate()
-        let choice = alert.runModal()
-        do {
-            if !isInstalled, choice == .alertFirstButtonReturn {
-                try save(adding(to: settings))
-            } else if isInstalled, choice == .alertSecondButtonReturn {
-                try save(removing(from: settings))
-            }
-        } catch {
-            NSAlert(error: error).runModal()
+            return nil
         }
     }
-
-    // MARK: - Settings
 
     private static func readSettings() throws -> [String: Any] {
         guard let data = try? Data(contentsOf: settingsURL), !data.isEmpty else { return [:] }
@@ -150,17 +172,7 @@ enum ClaudeCodeSetup {
         (handler["command"] as? String)?.hasSuffix("/MacCove/agent-hook.sh") == true
     }
 
-    private static func isInstalled(in settings: [String: Any]) -> Bool {
-        let events = settings["hooks"] as? [String: Any] ?? [:]
-        return events.values.contains { groups in
-            (groups as? [[String: Any]] ?? []).contains { group in
-                (group["hooks"] as? [[String: Any]] ?? []).contains(where: isMacCoveHook)
-            }
-        }
-    }
-
-    /// Every event's groups without MacCove's handlers, dropping groups left
-    /// empty.
+    /// Every event's groups without MacCove's handlers, dropping groups left empty.
     private static func removing(from settings: [String: Any]) -> [String: Any] {
         var settings = settings
         var events = settings["hooks"] as? [String: Any] ?? [:]
@@ -225,6 +237,12 @@ enum ClaudeCodeSetup {
         # A permission request, and a question or plan (UserInput), wait for
         # MacCove's answer, which is printed for Claude Code. When MacCove isn't
         # running, nothing happens.
+        #
+        # Claude Code keeps the hooks a session started with, so after Remove
+        # Claude Code an open session still runs this. It does nothing once
+        # the hook is no longer in the settings.
+
+        grep -qF '/MacCove/agent-hook.sh' "$HOME/.claude/settings.json" 2>/dev/null || exit 0
 
         socket="$HOME/Library/Application Support/MacCove/agents.sock"
         [ -S "$socket" ] || exit 0
@@ -241,4 +259,10 @@ enum ClaudeCodeSetup {
           --data-binary @- "http://maccove/$1/$2" || exit 0
 
         """#
+}
+
+extension Notification.Name {
+    /// Posted once Remove has taken MacCove's hooks out of Claude Code's
+    /// settings. `ClaudeCodeMonitor` then lets go of its sessions.
+    static let claudeCodeHooksRemoved = Notification.Name("MacCoveClaudeCodeHooksRemoved")
 }

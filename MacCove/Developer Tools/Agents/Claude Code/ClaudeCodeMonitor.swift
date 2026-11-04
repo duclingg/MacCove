@@ -164,6 +164,19 @@ final class ClaudeCodeMonitor {
     /// Each waiting hook, by what it's asking.
     @ObservationIgnored private var pendingAnswers: [UUID: CheckedContinuation<AgentBridge.Response, Never>] = [:]
     @ObservationIgnored private var processCheck: Task<Void, Never>?
+    @ObservationIgnored private var hooksRemovedObserver: NSObjectProtocol?
+
+    init() {
+        // Once the hooks are out, the sessions shown hear nothing more,
+        // not even their SessionEnd, so they leave the island now.
+        hooksRemovedObserver = NotificationCenter.default.addObserver(
+            forName: .claudeCodeHooksRemoved,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.endAll() }
+        }
+    }
 
     /// Just under the hook's 10 minutes, so Claude Code gets an answer,
     /// and asks in the terminal, rather than timing the hook out.
@@ -378,6 +391,14 @@ final class ClaudeCodeMonitor {
         session.updatedAt = .now
         sessions[id] = session
         onEvent?(.finished)
+    }
+
+    /// Every session, as if each had ended. Anything waiting goes back to
+    /// Claude Code unanswered, so it asks in the terminal.
+    private func endAll() {
+        for id in sessions.keys {
+            end(id)
+        }
     }
 
     private func end(_ id: String) {

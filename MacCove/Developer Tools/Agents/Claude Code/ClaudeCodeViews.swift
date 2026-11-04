@@ -8,57 +8,23 @@
 import SwiftUI
 
 extension Color {
-    /// The design's Claude Code accent.
     static let claudeCode = Color(red: 217 / 255, green: 119 / 255, blue: 87 / 255)
-    /// Waiting for you: the system orange.
     static let agentWaiting = Color(red: 1, green: 159 / 255, blue: 10 / 255)
-    /// Dark text on a coloured button.
     fileprivate static let onAccent = Color(red: 20 / 255, green: 20 / 255, blue: 19 / 255)
 }
 
-/// The design's Claude Code glyph: six rays from a point, in a 24pt box.
-nonisolated private struct SparkShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: 12, y: 3.5))
-        path.addLine(to: CGPoint(x: 12, y: 20.5))
-        path.move(to: CGPoint(x: 4.6, y: 7.75))
-        path.addLine(to: CGPoint(x: 19.4, y: 16.25))
-        path.move(to: CGPoint(x: 4.6, y: 16.25))
-        path.addLine(to: CGPoint(x: 19.4, y: 7.75))
-        let scale = min(rect.width, rect.height) / 24
-        return path
-            .applying(CGAffineTransform(scaleX: scale, y: scale))
-            .offsetBy(dx: rect.midX - 12 * scale, dy: rect.midY - 12 * scale)
-    }
-}
-
-private struct ClaudeGlyph: View {
-    var color: Color = .claudeCode
+// MARK: ClaudeCodeIcon
+struct ClaudeCodeIcon: View {
     let size: CGFloat
 
     var body: some View {
-        SparkShape()
-            .stroke(color, style: StrokeStyle(lineWidth: 2.2 * size / 24, lineCap: .round))
+        Image("ClaudeCode")
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
             .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
             .accessibilityHidden(true)
-    }
-}
-
-/// The Claude app's own icon, whose mark Claude Code shares, or the drawn
-/// spark when the app isn't installed.
-private struct ClaudeCodeIcon: View {
-    let size: CGFloat
-
-    static let hasClaudeApp = NSWorkspace.shared.urlForApplication(withBundleIdentifier: claudeApp) != nil
-    private static let claudeApp = "com.anthropic.claudefordesktop"
-
-    var body: some View {
-        if Self.hasClaudeApp {
-            AppIcon(bundleIdentifier: Self.claudeApp, size: size, fallbackSystemName: "sparkle", fallbackTint: .claudeCode)
-        } else {
-            ClaudeGlyph(size: size)
-        }
     }
 }
 
@@ -314,16 +280,8 @@ struct ClaudeCodeExpandedView: View {
             Button {
                 claude.openSession()
             } label: {
-                Group {
-                    if ClaudeCodeIcon.hasClaudeApp {
-                        ClaudeCodeIcon(size: 44)
-                    } else {
-                        ClaudeGlyph(size: 26)
-                            .frame(width: 44, height: 44)
-                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.12)))
-                    }
-                }
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                ClaudeCodeIcon(size: 44)
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open Session")

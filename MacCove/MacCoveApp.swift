@@ -43,9 +43,6 @@ struct MacCoveApp: App {
             Button("Set Up Terminal Commands…") {
                 TerminalHook.showSetup()
             }
-            Button("Set Up Claude Code…") {
-                ClaudeCodeSetup.showSetup()
-            }
             Button(githubSource.isEmpty ? "Connect GitHub…" : "GitHub Pull Requests…") {
                 appDelegate.showGitHubSetup()
             }
