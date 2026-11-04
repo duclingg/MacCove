@@ -29,6 +29,9 @@ enum IslandActivity: Hashable {
     case github
     /// "Copied" for a moment, or the last few copies.
     case clipboard
+    /// The next event from Calendar, when to leave for it, or the rest
+    /// of the day.
+    case calendar
     case nowPlaying
 
     /// How long a battery alert stays; the others leave by themselves.
@@ -36,7 +39,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .nowPlaying: .zero
         }
     }
 }
@@ -93,6 +96,7 @@ final class NotchViewModel {
     let claude: ClaudeCodeMonitor
     let github: GitHubMonitor
     let clipboard: ClipboardMonitor
+    let calendar: CalendarMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
@@ -140,7 +144,8 @@ final class NotchViewModel {
         terminal: TerminalCommandMonitor,
         claude: ClaudeCodeMonitor,
         github: GitHubMonitor,
-        clipboard: ClipboardMonitor
+        clipboard: ClipboardMonitor,
+        calendar: CalendarMonitor
     ) {
         self.nowPlaying = nowPlaying
         self.audioRoute = audioRoute
@@ -151,6 +156,7 @@ final class NotchViewModel {
         self.claude = claude
         self.github = github
         self.clipboard = clipboard
+        self.calendar = calendar
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
             self?.playbackChanged(playing: playing)
@@ -189,6 +195,13 @@ final class NotchViewModel {
         clipboard.isInUse = { [weak self] in
             guard let self else { return false }
             return self.hovered == .clipboard || (self.presentation == .expanded && self.expandedActivity == .clipboard)
+        }
+        calendar.onEvent = { [weak self] event in
+            self?.calendarEvent(event)
+        }
+        calendar.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.isHovering || self.presentation == .expanded
         }
     }
 
@@ -245,6 +258,9 @@ final class NotchViewModel {
         }
         if isShowingAll, github.activity != nil {
             running.append(.github)
+        }
+        if isShowingAll, calendar.isShown {
+            running.append(.calendar)
         }
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
@@ -332,6 +348,7 @@ final class NotchViewModel {
             case .charging?: Self.chargingWidth(notch: notch)
             case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
             case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
+            case .calendar?: CalendarCompactView.width(for: calendar, notch: notch)
             case .claudeCode?: Self.compactWidth(notch: notch)
             default: Self.compactWidth(notch: notch)
             }
@@ -348,6 +365,7 @@ final class NotchViewModel {
             case .claudeCode?: ClaudeCodeExpandedView.bodyHeight(for: claude.session)
             case .github?: GitHubExpandedView.bodyHeight(for: github)
             case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
+            case .calendar?: CalendarExpandedView.bodyHeight(for: calendar)
             default: BatteryExpandedView.bodyHeight
             }
             return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
@@ -547,6 +565,7 @@ final class NotchViewModel {
             terminal.leaveIfDue(after: .seconds(1.2))
             github.leaveIfDue(after: .seconds(1.2))
             clipboard.leaveIfDue(after: .seconds(1.2))
+            calendar.leaveIfDue(after: .seconds(1.2))
         }
     }
 
@@ -687,6 +706,34 @@ final class NotchViewModel {
         }
     }
 
+    /// Time to leave opens by itself, as a failure does. The rest just
+    /// shows.
+    private func calendarEvent(_ event: CalendarMonitor.Event) {
+        switch event {
+        case .started: activityStarted(.calendar)
+        case .timeToLeave: activityFailed(.calendar)
+        case .ended: activityEnded(.calendar)
+        }
+    }
+
+    /// From the menu bar: the rest of the day, opened and then closed the
+    /// way the clipboard history is.
+    func showTodayEvents() {
+        guard !isSigningIn, batteryAlert == nil else { return }
+        calendar.showToday()
+        collapseTask?.cancel()
+        failureCollapseTask?.cancel()
+        expandedActivity = .calendar
+        presentation = .expanded
+        failureCollapseTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.failureOpenDuration)
+            guard !Task.isCancelled, let self, !self.isHovering,
+                  self.presentation == .expanded, self.expandedActivity == .calendar else { return }
+            self.presentation = .compact
+            self.calendar.leaveIfDue(after: .seconds(1.2))
+        }
+    }
+
     /// From the menu bar: opens the history over whatever else is open,
     /// then shrinks back to the pill after a while if the cursor never
     /// comes, and leaves.
@@ -800,6 +847,7 @@ final class NotchViewModel {
             self.terminal.leaveIfDue(after: .seconds(1.2))
             self.github.leaveIfDue(after: .seconds(1.2))
             self.clipboard.leaveIfDue(after: .seconds(1.2))
+            self.calendar.leaveIfDue(after: .seconds(1.2))
         }
     }
 }
