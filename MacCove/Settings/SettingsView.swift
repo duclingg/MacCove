@@ -9,12 +9,13 @@ import SwiftUI
 
 struct SettingsView: View {
     // MARK: States
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var selectedCategory: SettingsCategory = .general
     @State private var searchText = ""
     
     // MARK: View
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: $selectedCategory) {
                 ForEach(SettingsCategory.allCases, id: \.self) { category in
                     categoryRow(category)

@@ -33,7 +33,7 @@ struct GeneralSettingsView: View {
                     // TODO: Show in menu bar setting
                     Text("Show MacCove in the menu bar")
                     Text("Settings and Quit live there. If hidden, open MacCove again to see this window.")
-                }
+                }.disabled(true)
                 Picker("Open the notch", selection: $notchOpens) {
                     // TODO: Notch opens settings
                     Group {
@@ -48,9 +48,9 @@ struct GeneralSettingsView: View {
                         }.tag(NotchOpenType.whenClicked)
                     }
                     .buttonStyle(.plain)
-                }
+                }.disabled(true)
                 // TODO: Trackpad setting
-                Toggle("Trackpad feedback when it opens", isOn: $trackpadFeedback)
+                Toggle("Trackpad feedback when it opens", isOn: $trackpadFeedback).disabled(true)
             }
             
             Section("Notch") {
@@ -58,7 +58,7 @@ struct GeneralSettingsView: View {
                     // TODO: Hide in full screen setting
                     Text("Hide while an app is full screen")
                     Text("Calls and alarms still show")
-                }
+                }.disabled(true)
                 Picker("Show at most", selection: $maxActivities) {
                     // TODO: Max activities settings
                     Group {
@@ -74,13 +74,14 @@ struct GeneralSettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                .disabled(true)
             }
             
             Section {
                 LabeledContent {
                     Button("Show") {
                         // TODO: Show Welcome Again
-                    }
+                    }.disabled(true)
                 } label: {
                     Text("Show Welcome Again")
                     Text("Runs the setup from the first launch.")
@@ -88,7 +89,7 @@ struct GeneralSettingsView: View {
                 LabeledContent("Reset all settings") {
                     Button("Reset...", role: .destructive) {
                         // TODO: Reset all settings
-                    }
+                    }.disabled(true)
                 }
                 .tint(.red)
             }
