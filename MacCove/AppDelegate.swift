@@ -22,8 +22,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var github = GitHubMonitor()
     private(set) lazy var calendar = CalendarMonitor()
     
+    /// Opens Settings, given by `MacCoveApp`, which can open windows.
+    var showSettings: (() -> Void)?
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// Opening MacCove while it's running, from the Finder, Spotlight or
+    /// Launchpad, shows Settings: with the menu bar item hidden, it's the
+    /// only way there.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        showSettings?()
+        return false
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {

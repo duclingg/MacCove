@@ -15,6 +15,7 @@ struct MacCoveApp: App {
     @AppStorage(TerminalHook.thresholdKey) private var terminalThreshold = TerminalHook.defaultThreshold
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
     @State private var isClipboardRestricted = ClipboardMonitor.isAccessRestricted
+    @AppStorage(NotchSettings.showInMenuBarKey) private var showsInMenuBar = true
 
     /// Xcode runs the app to draw SwiftUI previews, which shouldn't add a
     /// menu bar item each time. Previews in JIT mode set the playgrounds
@@ -23,7 +24,13 @@ struct MacCoveApp: App {
         .contains { ProcessInfo.processInfo.environment[$0] == "1" }
 
     var body: some Scene {
-        MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled", isInserted: .constant(!Self.isRunningForPreviews)) {
+        let _ = connectAppDelegate()
+
+        // Hidden from General, or by dragging it out of the menu bar with ⌘.
+        MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled", isInserted: Binding(
+            get: { showsInMenuBar && !Self.isRunningForPreviews },
+            set: { showsInMenuBar = $0 }
+        )) {
             Button("Settings", systemImage: "gear") {
                 showSettings()
             }
@@ -82,6 +89,13 @@ struct MacCoveApp: App {
     }
 
     private static let settingsWindowID = "settings-window"
+
+    /// AppDelegate has no SwiftUI environment to open windows with, so
+    /// opening MacCove again, the way back to Settings once the menu bar
+    /// item is hidden, comes through here.
+    private func connectAppDelegate() {
+        appDelegate.showSettings = showSettings
+    }
     
     private func showSettings() {
         openWindow(id: Self.settingsWindowID)

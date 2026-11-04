@@ -89,7 +89,7 @@ struct ActivitiesSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .toggleStyle(.switch)
+        .settingsSwitch()
     }
 
     /// Something macOS hasn't allowed, with a button to where it's fixed.

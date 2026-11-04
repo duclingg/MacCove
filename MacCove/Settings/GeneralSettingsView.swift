@@ -5,23 +5,21 @@
 //  Created by Justin Hoang on 11/3/26.
 //
 
+import AppKit
 import SwiftUI
-
-private enum NotchOpenType: String {
-    case hovered, shortPause, whenClicked
-}
 
 struct GeneralSettingsView: View {
     // MARK: AppStorage
-    @AppStorage("ShowInMenuBar") private var showInMenuBar = true
-    @AppStorage("NotchOpens") private var notchOpens: NotchOpenType = .whenClicked
-    @AppStorage("TrackpadFeedback") private var trackpadFeedback = true
-    @AppStorage("HideInFullScreen") private var hideInFullScreen = true
-    @AppStorage("MaxNotchActivities") private var maxActivities = 3
-    
+    @AppStorage(NotchSettings.showInMenuBarKey) private var showInMenuBar = true
+    @AppStorage(NotchSettings.openingKey) private var notchOpens = NotchSettings.defaultOpening
+    @AppStorage(NotchSettings.trackpadFeedbackKey) private var trackpadFeedback = true
+    @AppStorage(NotchSettings.hideInFullScreenKey) private var hideInFullScreen = true
+    @AppStorage(NotchSettings.maxActivitiesKey) private var maxActivities = NotchSettings.defaultMaxActivities
+
     // MARK: States
     @State private var launchAtLogin = LaunchAtLogin()
-    
+    @State private var isConfirmingReset = false
+
     var body: some View {
         Form {
             Section {
@@ -30,74 +28,80 @@ struct GeneralSettingsView: View {
                     set: { launchAtLogin.setEnabled($0) }
                 ))
                 Toggle(isOn: $showInMenuBar) {
-                    // TODO: Show in menu bar setting
                     Text("Show MacCove in the menu bar")
                     Text("Settings and Quit live there. If hidden, open MacCove again to see this window.")
-                }.disabled(true)
+                }
                 Picker("Open the notch", selection: $notchOpens) {
-                    // TODO: Notch opens settings
-                    Group {
-                        Button("When hovered") {
-                            
-                        }.tag(NotchOpenType.hovered)
-                        Button("After a short pause") {
-                            
-                        }.tag(NotchOpenType.shortPause)
-                        Button("Only when clicked") {
-                            
-                        }.tag(NotchOpenType.whenClicked)
+                    ForEach(NotchSettings.Opening.allCases, id: \.self) { opening in
+                        Text(opening.title).tag(opening)
                     }
-                    .buttonStyle(.plain)
-                }.disabled(true)
-                // TODO: Trackpad setting
-                Toggle("Trackpad feedback when it opens", isOn: $trackpadFeedback).disabled(true)
+                }
+                Toggle("Trackpad feedback when it opens", isOn: $trackpadFeedback)
             }
-            
+
             Section("Notch") {
                 Toggle(isOn: $hideInFullScreen) {
-                    // TODO: Hide in full screen setting
                     Text("Hide while an app is full screen")
-                    Text("Calls and alarms still show")
-                }.disabled(true)
-                Picker("Show at most", selection: $maxActivities) {
-                    // TODO: Max activities settings
-                    Group {
-                        Button("3 activites") {
-                            
-                        }.tag(3)
-                        Button("2 activites") {
-                            
-                        }.tag(2)
-                        Button("1 activity") {
-                            
-                        }.tag(1)
-                    }
-                    .buttonStyle(.plain)
+                    Text("Touch ID at the lock screen still shows. Move the pointer to the top of the screen to bring the rest back.")
                 }
-                .disabled(true)
+                Picker("Show at most", selection: $maxActivities) {
+                    ForEach(NotchSettings.maxActivitiesOptions, id: \.self) { count in
+                        Text(count == 1 ? "1 activity" : "\(count) activities").tag(count)
+                    }
+                }
             }
-            
+
             Section {
+                // The first-launch welcome isn't built yet.
                 LabeledContent {
-                    Button("Show") {
-                        // TODO: Show Welcome Again
-                    }.disabled(true)
+                    Button("Show") {}
+                        .disabled(true)
                 } label: {
                     Text("Show Welcome Again")
                     Text("Runs the setup from the first launch.")
                 }
                 LabeledContent("Reset all settings") {
-                    Button("Reset...", role: .destructive) {
-                        // TODO: Reset all settings
-                    }.disabled(true)
+                    Button("Reset…", role: .destructive) {
+                        isConfirmingReset = true
+                    }
                 }
                 .tint(.red)
             }
         }
         .formStyle(.grouped)
-        .toggleStyle(.switch)
+        .settingsSwitch()
         .onAppear {
             launchAtLogin.refresh()
+        }
+        .confirmationDialog("Reset All Settings?", isPresented: $isConfirmingReset) {
+            Button("Reset and Reopen MacCove", role: .destructive) {
+                Self.resetAndRelaunch()
+            }
+        } message: {
+            Text("Every setting goes back to how it was the first time MacCove opened, and MacCove reopens. GitHub stays signed in, and what you set up in Developer Tools stays set up.")
+        }
+    }
+
+    /// Clears MacCove's settings, keeping the GitHub sign-in, then opens a
+    /// new MacCove and quits this one, so every monitor starts again from
+    /// its defaults rather than what it read at launch.
+    private static func resetAndRelaunch() {
+        let defaults = UserDefaults.standard
+        guard let domain = Bundle.main.bundleIdentifier else { return }
+        let kept = [GitHubSetup.sourceKey, GitHubSetup.repositoriesKey].compactMap { key in
+            defaults.object(forKey: key).map { (key, $0) }
+        }
+        defaults.removePersistentDomain(forName: domain)
+        for (key, value) in kept {
+            defaults.set(value, forKey: key)
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
+            Task { @MainActor in
+                NSApp.terminate(nil)
+            }
         }
     }
 }

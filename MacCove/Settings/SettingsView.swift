@@ -58,3 +58,10 @@ struct SettingsView: View {
         }
     }
 }
+
+extension View {
+    func settingsSwitch() -> some View {
+        toggleStyle(.switch)
+            .tint(.green)
+    }
+}

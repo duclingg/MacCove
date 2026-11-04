@@ -126,7 +126,13 @@ final class NotchViewModel {
     private var isRevealedByHover = false
     /// A full-screen app is in front on this display: the island steps
     /// aside, as on the iPhone.
-    private var isFullScreenActive = false
+    /// The app in front is full screen on this display.
+    private var isFrontAppFullScreen = false
+    /// The front app's full screen hides the notch, unless General says
+    /// otherwise.
+    private var isFullScreenActive: Bool {
+        isFrontAppFullScreen && hidesInFullScreen
+    }
     private var isSigningIn = false
     /// The charging pill or the low battery alert, until it times out.
     private var batteryAlert: IslandActivity?
@@ -151,6 +157,16 @@ final class NotchViewModel {
     var frontApp: FrontApp?
 
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
+    /// Opening after the cursor has rested on the notch for a moment.
+    @ObservationIgnored private var hoverOpenTask: Task<Void, Never>?
+
+    // General's settings, read again whenever they change.
+    /// At most this many shown on their own.
+    private(set) var maxActivities = NotchSettings.maxActivities
+    private var hidesInFullScreen = NotchSettings.hidesInFullScreen
+    @ObservationIgnored private var opening = NotchSettings.opening
+    @ObservationIgnored private var hasTrackpadFeedback = NotchSettings.hasTrackpadFeedback
+    @ObservationIgnored private var settingsObserver: NSObjectProtocol?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
     @ObservationIgnored private var alertTask: Task<Void, Never>?
     /// Closes a failure, or the clipboard history from the menu bar, that
@@ -225,21 +241,40 @@ final class NotchViewModel {
             guard let self else { return false }
             return self.isHovering || self.presentation == .expanded
         }
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.readSettings() }
+        }
     }
 
-    /// Most shown on their own: one in the island and two in bubbles. The
-    /// rest stack up as mini icons in the right bubble.
-    static let maxActivities = 3
+    /// General's settings, as they change in Settings.
+    private func readSettings() {
+        opening = NotchSettings.opening
+        hasTrackpadFeedback = NotchSettings.hasTrackpadFeedback
+        if maxActivities != NotchSettings.maxActivities {
+            maxActivities = NotchSettings.maxActivities
+        }
+        if hidesInFullScreen != NotchSettings.hidesInFullScreen {
+            let wasActive = isFullScreenActive
+            hidesInFullScreen = NotchSettings.hidesInFullScreen
+            if isFullScreenActive, !wasActive {
+                fullScreenBecameActive()
+            }
+        }
+    }
 
     /// What's shown on its own, the island's first and the rest for the
     /// bubbles.
     var activities: [IslandActivity] {
-        Array(runningActivities.prefix(Self.maxActivities))
+        Array(runningActivities.prefix(maxActivities))
     }
 
     /// Running past those, stacked as mini icons in the right bubble.
     var overflowActivities: [IslandActivity] {
-        Array(runningActivities.dropFirst(Self.maxActivities))
+        Array(runningActivities.dropFirst(maxActivities))
     }
 
     /// Everything running, in order, but what's been swiped away.
@@ -294,7 +329,7 @@ final class NotchViewModel {
         if !includingHidden {
             running.removeAll { hiddenActivities.contains($0) || isInFront($0) }
         }
-        if running.count > Self.maxActivities, let promotedActivity,
+        if running.count > maxActivities, let promotedActivity,
            let index = running.firstIndex(of: promotedActivity), index > 1 {
             running.insert(running.remove(at: index), at: 1)
         }
@@ -574,8 +609,33 @@ final class NotchViewModel {
         }
         collapseTask?.cancel()
         alertTask?.cancel()
+        hoverOpenTask?.cancel()
+        // A tap on the trackpad as it opens, not again for a switch
+        // between activities while it's open.
+        if presentation != .expanded, hasTrackpadFeedback {
+            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+        }
         expandedActivity = activity
         presentation = .expanded
+    }
+
+    /// Opens what's under the cursor, straight away or after a pause, when
+    /// General says the notch opens on hover.
+    private func openOnHoverIfNeeded() {
+        hoverOpenTask?.cancel()
+        guard presentation == .compact, let activity = hovered else { return }
+        switch opening {
+        case .whenClicked:
+            break
+        case .hovered:
+            expand(activity)
+        case .shortPause:
+            hoverOpenTask = Task { [weak self] in
+                try? await Task.sleep(for: NotchSettings.openingPause)
+                guard !Task.isCancelled, let self, self.presentation == .compact, let hovered = self.hovered else { return }
+                self.expand(hovered)
+            }
+        }
     }
 
     /// A swipe on the pill or a bubble, or on the notch with nothing
@@ -661,7 +721,11 @@ final class NotchViewModel {
             // A failure that opened by itself stays open while the cursor
             // is on it, then closes like anything else.
             failureCollapseTask?.cancel()
-        } else if presentation == .compact {
+            openOnHoverIfNeeded()
+        } else {
+            hoverOpenTask?.cancel()
+        }
+        if !isHovering, presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
             terminal.leaveIfDue(after: .seconds(1.2))
             github.leaveIfDue(after: .seconds(1.2))
@@ -678,13 +742,18 @@ final class NotchViewModel {
     /// Entering full screen closes the player too, so it doesn't come back
     /// expanded when you leave.
     func setFullScreenActive(_ active: Bool) {
-        guard active != isFullScreenActive else { return }
-        isFullScreenActive = active
-        if active {
-            collapseTask?.cancel()
-            presentation = .compact
-            isRevealedByHover = false
+        guard active != isFrontAppFullScreen else { return }
+        let wasActive = isFullScreenActive
+        isFrontAppFullScreen = active
+        if isFullScreenActive, !wasActive {
+            fullScreenBecameActive()
         }
+    }
+
+    private func fullScreenBecameActive() {
+        collapseTask?.cancel()
+        presentation = .compact
+        isRevealedByHover = false
     }
 
     /// The cursor reached the hover strip: slide the island down under it.
