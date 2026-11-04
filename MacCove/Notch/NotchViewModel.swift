@@ -164,6 +164,8 @@ final class NotchViewModel {
     /// At most this many shown on their own.
     private(set) var maxActivities = NotchSettings.maxActivities
     private var hidesInFullScreen = NotchSettings.hidesInFullScreen
+    private var noNotchVisibility = NotchSettings.noNotchVisibility
+    private var showsHandleSetting = NotchSettings.showsHandle
     @ObservationIgnored private var opening = NotchSettings.opening
     @ObservationIgnored private var hasTrackpadFeedback = NotchSettings.hasTrackpadFeedback
     @ObservationIgnored private var settingsObserver: NSObjectProtocol?
@@ -256,6 +258,12 @@ final class NotchViewModel {
         hasTrackpadFeedback = NotchSettings.hasTrackpadFeedback
         if maxActivities != NotchSettings.maxActivities {
             maxActivities = NotchSettings.maxActivities
+        }
+        if noNotchVisibility != NotchSettings.noNotchVisibility {
+            noNotchVisibility = NotchSettings.noNotchVisibility
+        }
+        if showsHandleSetting != NotchSettings.showsHandle {
+            showsHandleSetting = NotchSettings.showsHandle
         }
         if hidesInFullScreen != NotchSettings.hidesInFullScreen {
             let wasActive = isFullScreenActive
@@ -364,9 +372,14 @@ final class NotchViewModel {
 
     /// Without a camera housing to hide behind, an idle island would be a
     /// floating black pill, so it slides up off the top of the screen
-    /// instead.
+    /// instead, unless Displays says to keep it there always.
     var isTuckedAway: Bool {
-        state == .idle && !hasPhysicalNotch
+        state == .idle && !hasPhysicalNotch && noNotchVisibility != .always
+    }
+
+    /// A small bar at the top edge, marking where the tucked-away island is.
+    var showsHandle: Bool {
+        isTuckedAway && showsHandleSetting
     }
 
     /// Whether the hover strip has anything to bring back: the island is

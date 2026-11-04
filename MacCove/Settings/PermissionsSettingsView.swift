@@ -30,6 +30,11 @@ struct PermissionsSettingsView: View {
                 ForEach(permissions) { permission in
                     permissionRow(permission)
                 }
+                LabeledContent("Privacy & Security") {
+                    Button("Open System Settings") {
+                        Permission.openPrivacy(nil)
+                    }
+                }
             } footer: {
                 Text("MacCove can’t change these itself. To turn one off, or back on after you denied it, use System Settings › Privacy & Security.")
             }
@@ -342,8 +347,11 @@ private struct Permission: Identifiable {
         )
     }
 
-    private static func openPrivacy(_ pane: String) {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(pane)") else { return }
+    /// Privacy & Security in System Settings, at `pane` when there's one:
+    /// "Privacy_Contacts" and so on.
+    static func openPrivacy(_ pane: String?) {
+        let base = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension"
+        guard let url = URL(string: pane.map { "\(base)?\($0)" } ?? base) else { return }
         NSWorkspace.shared.open(url)
     }
 }

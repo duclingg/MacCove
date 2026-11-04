@@ -27,6 +27,9 @@ final class NotchWindowController {
     private var screen: NSScreen?
     private var eventMonitors: [Any] = []
     private var screenObserver: NSObjectProtocol?
+    private var settingsObserver: NSObjectProtocol?
+    /// Off on a display without a notch when Displays says Never.
+    private var isPanelShown = true
     private var workspaceObservers: [NSObjectProtocol] = []
     private var fullScreenCheck: Task<Void, Never>?
     private var menuMeasurement: Task<Void, Never>?
@@ -62,10 +65,21 @@ final class NotchWindowController {
         panel.contentView = hostingView
 
         reposition()
-        panel.orderFrontRegardless()
+        if isPanelShown {
+            panel.orderFrontRegardless()
+        }
 
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reposition() }
+        }
+        // Displays' settings: which display, and whether one without a
+        // notch shows MacCove at all.
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -138,7 +152,7 @@ final class NotchWindowController {
             }
             return
         }
-        guard lockScreenPanel == nil else { return }
+        guard lockScreenPanel == nil, isPanelShown else { return }
         let lockPanel = NotchPanel()
         let hostingView = NotchHostingView(rootView: IslandView(viewModel: viewModel))
         hostingView.sizingOptions = []
@@ -251,12 +265,22 @@ final class NotchWindowController {
         viewModel.setFullScreenActive(isFullScreen)
     }
 
+    /// Onto the display Displays picks, at the top centre, or out of sight
+    /// on one without a notch when it says Never. Only does anything when
+    /// that's changed, since it runs on every change to the settings.
     private func reposition() {
-        guard let screen = NSScreen.primary else { return }
-        self.screen = screen
-        viewModel.notchSize = screen.notchSize
-        viewModel.hasPhysicalNotch = screen.hasNotch
-        viewModel.screenWidth = screen.frame.width
+        guard let screen = NotchSettings.screen else { return }
+        let shows = screen.hasNotch || NotchSettings.noNotchVisibility != .never
+        if shows != isPanelShown {
+            isPanelShown = shows
+            if shows {
+                panel.orderFrontRegardless()
+            } else {
+                panel.orderOut(nil)
+                setReceivesMouse(false)
+                viewModel.setHovering(nil)
+            }
+        }
 
         let size = Self.canvasSize
         let frame = NSRect(
@@ -265,13 +289,29 @@ final class NotchWindowController {
             width: size.width,
             height: size.height
         )
+        guard frame != panel.frame || screen.displayID != self.screen?.displayID || screen.notchSize != viewModel.notchSize else { return }
+        self.screen = screen
+        viewModel.notchSize = screen.notchSize
+        viewModel.hasPhysicalNotch = screen.hasNotch
+        viewModel.screenWidth = screen.frame.width
         panel.setFrame(frame, display: true)
         checkFullScreen()
+        measureAppMenus()
+    }
+
+    /// With Display with the pointer, the notch moves to the display the
+    /// pointer has moved to, but not while it's open.
+    private func followPointerIfNeeded(_ mouse: NSPoint) {
+        guard NotchSettings.activityDisplay == .pointer, viewModel.state != .expanded,
+              let screen, !NSMouseInRect(mouse, screen.frame, false),
+              NSScreen.withPointer != nil else { return }
+        reposition()
     }
 
     private func updateMouse() {
-        guard let screen else { return }
         let mouse = NSEvent.mouseLocation
+        followPointerIfNeeded(mouse)
+        guard let screen, isPanelShown else { return }
         let top = screen.frame.maxY
 
         // A tucked-away island comes back when the cursor reaches the strip

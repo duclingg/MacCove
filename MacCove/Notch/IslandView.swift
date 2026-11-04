@@ -16,6 +16,8 @@ struct IslandView: View {
     /// Extra distance past the top edge when tucked away, enough to clear
     /// the few points the island grows on hover.
     private static let tuckClearance: CGFloat = 12
+    /// The bar marking a tucked-away island, on displays without a notch.
+    private static let handleSize = CGSize(width: 44, height: 5)
     fileprivate static let topBleed: CGFloat = 8
 
     var body: some View {
@@ -72,6 +74,20 @@ struct IslandView: View {
         .offset(y: viewModel.isTuckedAway ? -(viewModel.notchSize.height + Self.tuckClearance) : 0)
         .animation(.islandSlide, value: viewModel.isTuckedAway)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Where the island is while it's tucked away, when Displays asks
+        // for it. Outside the slide, so it stays at the edge.
+        .overlay(alignment: .top) {
+            if viewModel.showsHandle {
+                Capsule()
+                    .fill(.white.opacity(0.35))
+                    .frame(width: Self.handleSize.width, height: Self.handleSize.height)
+                    .overlay(Capsule().strokeBorder(.black.opacity(0.25), lineWidth: 0.5))
+                    .padding(.top, 3)
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: viewModel.showsHandle)
         .animation(.island, value: geometry)
         .animation(.island, value: bubbles)
         .environment(\.colorScheme, .dark)
