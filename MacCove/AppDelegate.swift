@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var signIn = SignInMonitor()
     private(set) lazy var clipboard = ClipboardMonitor()
     private(set) lazy var github = GitHubMonitor()
+    private(set) lazy var downloads = DownloadMonitor()
     private(set) lazy var calendar = CalendarMonitor()
     private(set) lazy var reminders = RemindersMonitor()
     private(set) lazy var deviceBatteries = DeviceBatteryMonitor()
@@ -65,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             terminal: terminal,
             claude: claude,
             github: github,
+            downloads: downloads,
             clipboard: clipboard,
             calendar: calendar,
             reminders: reminders,
@@ -98,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         calendar.start()
         reminders.start()
         deviceBatteries.start()
+        downloads.start()
         updates.startAutomaticChecks()
         
         // Hook events from Claude Code, by the agent they're for.

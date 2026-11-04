@@ -34,6 +34,8 @@ enum IslandActivity: Hashable {
     case claudeCode
     /// A pull request's checks, or a review someone asked you for.
     case github
+    /// Files coming into the Downloads folder, then the last one done.
+    case downloads
     /// "Copied" for a moment, or the last few copies.
     case clipboard
     /// The next event from Calendar, when to leave for it, or the rest
@@ -55,7 +57,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .mirror, .shelf, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .github, .downloads, .clipboard, .calendar, .reminders, .deviceBatteries, .mirror, .shelf, .nowPlaying: .zero
         }
     }
 }
@@ -111,6 +113,7 @@ final class NotchViewModel {
     let terminal: TerminalCommandMonitor
     let claude: ClaudeCodeMonitor
     let github: GitHubMonitor
+    let downloads: DownloadMonitor
     let clipboard: ClipboardMonitor
     let calendar: CalendarMonitor
     let reminders: RemindersMonitor
@@ -197,6 +200,7 @@ final class NotchViewModel {
         terminal: TerminalCommandMonitor,
         claude: ClaudeCodeMonitor,
         github: GitHubMonitor,
+        downloads: DownloadMonitor,
         clipboard: ClipboardMonitor,
         calendar: CalendarMonitor,
         reminders: RemindersMonitor,
@@ -212,6 +216,7 @@ final class NotchViewModel {
         self.terminal = terminal
         self.claude = claude
         self.github = github
+        self.downloads = downloads
         self.clipboard = clipboard
         self.calendar = calendar
         self.reminders = reminders
@@ -245,6 +250,13 @@ final class NotchViewModel {
             self?.githubEvent(event)
         }
         github.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.isHovering || self.presentation == .expanded
+        }
+        downloads.onEvent = { [weak self] event in
+            self?.downloadsEvent(event)
+        }
+        downloads.isInUse = { [weak self] in
             guard let self else { return false }
             return self.isHovering || self.presentation == .expanded
         }
@@ -373,6 +385,9 @@ final class NotchViewModel {
         }
         if isShowingAll, claude.session != nil, !claude.needsAnswer {
             running.append(.claudeCode)
+        }
+        if isShowingAll, !downloads.downloads.isEmpty {
+            running.append(.downloads)
         }
         if isShowingAll, terminal.command != nil {
             running.append(.terminal)
@@ -511,6 +526,7 @@ final class NotchViewModel {
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
             case .claudeCode?: ClaudeCodeExpandedView.bodyHeight(for: claude.session)
             case .github?: GitHubExpandedView.bodyHeight(for: github)
+            case .downloads?: DownloadExpandedView.bodyHeight(for: downloads)
             case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
             case .calendar?: CalendarExpandedView.bodyHeight(for: calendar)
             case .reminders?: RemindersExpandedView.bodyHeight(for: reminders)
@@ -764,7 +780,7 @@ final class NotchViewModel {
         case .signIn, .charging, .lowBattery, .mirror: false
         case .claudeCode: !claude.needsAnswer
         case .shelf: shelf.dragPhase == nil
-        case .xcode, .terminal, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .nowPlaying: true
+        case .xcode, .terminal, .github, .downloads, .clipboard, .calendar, .reminders, .deviceBatteries, .nowPlaying: true
         }
     }
 
@@ -786,7 +802,7 @@ final class NotchViewModel {
         case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
         case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
         case .reminders: return frontID == RemindersMonitor.appBundleIdentifier
-        case .github, .clipboard, .deviceBatteries, .mirror, .shelf, .signIn, .charging, .lowBattery: return false
+        case .github, .downloads, .clipboard, .deviceBatteries, .mirror, .shelf, .signIn, .charging, .lowBattery: return false
         }
     }
 
@@ -825,6 +841,7 @@ final class NotchViewModel {
             scheduleAlertDismissal(after: .seconds(1.2))
             terminal.leaveIfDue(after: .seconds(1.2))
             github.leaveIfDue(after: .seconds(1.2))
+            downloads.leaveIfDue(after: .seconds(1.2))
             clipboard.leaveIfDue(after: .seconds(1.2))
             calendar.leaveIfDue(after: .seconds(1.2))
             reminders.leaveIfDue(after: .seconds(1.2))
@@ -965,6 +982,16 @@ final class NotchViewModel {
         case .answered: activityAnswered(.claudeCode)
         case .finished: break
         case .ended: activityEnded(.claudeCode)
+        }
+    }
+
+    /// Downloads never open by themselves: the ring fills, then a check
+    /// shows for a moment and leaves.
+    private func downloadsEvent(_ event: DownloadMonitor.Event) {
+        switch event {
+        case .started: activityStarted(.downloads)
+        case .finished: break
+        case .ended: activityEnded(.downloads)
         }
     }
 
@@ -1274,6 +1301,7 @@ final class NotchViewModel {
             self.scheduleAlertDismissal(after: .seconds(1.2))
             self.terminal.leaveIfDue(after: .seconds(1.2))
             self.github.leaveIfDue(after: .seconds(1.2))
+            self.downloads.leaveIfDue(after: .seconds(1.2))
             self.clipboard.leaveIfDue(after: .seconds(1.2))
             self.calendar.leaveIfDue(after: .seconds(1.2))
             self.reminders.leaveIfDue(after: .seconds(1.2))

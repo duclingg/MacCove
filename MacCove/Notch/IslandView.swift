@@ -126,6 +126,9 @@ struct IslandView: View {
                 case .github?:
                     GitHubCompactView(github: viewModel.github, notchSize: notch)
                         .transition(.islandContent)
+                case .downloads?:
+                    DownloadCompactView(monitor: viewModel.downloads, notchSize: notch)
+                        .transition(.islandContent)
                 case .clipboard?:
                     ClipboardCompactView(clipboard: viewModel.clipboard, notchSize: notch)
                         .transition(.islandContent)
@@ -156,9 +159,9 @@ struct IslandView: View {
                 }
             case .expanded:
                 // Sign-in never opens, so anything but the player, a build, a
-                // command, an agent, GitHub, the clipboard, the calendar,
-                // reminders, device batteries, Mirror or the shelf here is
-                // the battery's.
+                // command, an agent, GitHub, downloads, the clipboard, the
+                // calendar, reminders, device batteries, Mirror or the shelf
+                // here is the battery's.
                 switch viewModel.primaryActivity {
                 case .nowPlaying?:
                     NowPlayingExpandedView(
@@ -179,6 +182,9 @@ struct IslandView: View {
                         .transition(.islandContent)
                 case .github?:
                     GitHubExpandedView(github: viewModel.github, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case .downloads?:
+                    DownloadExpandedView(monitor: viewModel.downloads, notchHeight: notch.height)
                         .transition(.islandContent)
                 case .clipboard?:
                     ClipboardExpandedView(clipboard: viewModel.clipboard, notchHeight: notch.height)
@@ -307,6 +313,8 @@ private struct IslandBubbleView: View {
             ClaudeCodeMinimalView(claude: viewModel.claude, notchSize: viewModel.notchSize)
         case .github:
             GitHubMinimalView(github: viewModel.github, notchSize: viewModel.notchSize)
+        case .downloads:
+            DownloadMinimalView(monitor: viewModel.downloads, notchSize: viewModel.notchSize)
         case .clipboard:
             ClipboardMinimalView(notchSize: viewModel.notchSize)
         case .calendar:
