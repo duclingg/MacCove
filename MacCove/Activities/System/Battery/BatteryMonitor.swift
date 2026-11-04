@@ -37,6 +37,10 @@ final class BatteryMonitor {
     private(set) var minutesToEmpty: Int?
     private(set) var adapterWatts: Int?
 
+    static let enabledKey = "BatteryActivitiesEnabled"
+    /// On until it's turned off in Settings.
+    private(set) var isEnabled = UserDefaults.standard.object(forKey: BatteryMonitor.enabledKey) as? Bool ?? true
+
     @ObservationIgnored var onEvent: ((Event) -> Void)?
 
     @ObservationIgnored private var runLoopSource: CFRunLoopSource?
@@ -49,7 +53,19 @@ final class BatteryMonitor {
     @ObservationIgnored private var isPreview = false
     #endif
 
+    func setEnabled(_ enabled: Bool) {
+        guard enabled != isEnabled else { return }
+        isEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
+        if enabled {
+            start()
+        } else {
+            stop()
+        }
+    }
+
     func start() {
+        guard isEnabled, runLoopSource == nil else { return }
         refresh(announce: false)
 
         let context = Unmanaged.passUnretained(self).toOpaque()
@@ -70,6 +86,18 @@ final class BatteryMonitor {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.lowPowerModeChanged() }
         }
+    }
+
+    /// Stops watching the battery, so no more alerts or Charging show.
+    func stop() {
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+        runLoopSource = nil
+        if let powerStateObserver {
+            NotificationCenter.default.removeObserver(powerStateObserver)
+        }
+        powerStateObserver = nil
     }
 
     /// Only root can change Low Power Mode, so MacCoveHelper does it. The

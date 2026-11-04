@@ -12,9 +12,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var viewModel: NotchViewModel?
     private var xcode: XcodeBuildMonitor?
     private var terminal: TerminalCommandMonitor?
-    private var clipboard: ClipboardMonitor?
-    private(set) lazy var github = GitHubMonitor()
     private var agentBridge: AgentBridge?
+    private let music = MusicScripting()
+    // Made here rather than at launch, so Settings has them too.
+    private(set) lazy var nowPlaying = NowPlayingModel(music: music)
+    private(set) lazy var battery = BatteryMonitor()
+    private(set) lazy var signIn = SignInMonitor()
+    private(set) lazy var clipboard = ClipboardMonitor()
+    private(set) lazy var github = GitHubMonitor()
     private(set) lazy var calendar = CalendarMonitor()
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -22,21 +27,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let music = MusicScripting()
-        let nowPlaying = NowPlayingModel(music: music)
+        let nowPlaying = self.nowPlaying
         let audioRoute = AudioRouteMonitor(music: music) { [weak nowPlaying] in
             nowPlaying?.isAppleMusicPlaying == true
         }
-        let battery = BatteryMonitor()
-        let signIn = SignInMonitor()
         let xcode = XcodeBuildMonitor()
         let terminal = TerminalCommandMonitor()
         let claude = ClaudeCodeMonitor()
-        let github = self.github
-        let clipboard = ClipboardMonitor()
         self.xcode = xcode
         self.terminal = terminal
-        self.clipboard = clipboard
         let viewModel = NotchViewModel(
             nowPlaying: nowPlaying,
             audioRoute: audioRoute,
@@ -87,9 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     func setClipboardEnabled(_ enabled: Bool) {
         if enabled {
-            clipboard?.start()
+            clipboard.start()
         } else {
-            clipboard?.stop()
+            clipboard.stop()
         }
     }
     

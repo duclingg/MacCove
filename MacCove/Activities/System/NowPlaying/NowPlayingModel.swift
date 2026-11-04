@@ -58,6 +58,10 @@ final class NowPlayingModel {
     /// this is measured from Music directly. It's 0 for other apps.
     private var positionCorrection: TimeInterval = 0
 
+    static let enabledKey = "NowPlayingEnabled"
+    /// On until it's turned off in Settings.
+    private(set) var isEnabled = UserDefaults.standard.object(forKey: NowPlayingModel.enabledKey) as? Bool ?? true
+
     /// Lets the island dismiss itself on pause, like the iPhone.
     @ObservationIgnored var onPlayingChange: ((Bool) -> Void)?
     @ObservationIgnored private let controller = MediaController()
@@ -116,7 +120,19 @@ final class NowPlayingModel {
             .joined(separator: " • ")
     }
 
+    func setEnabled(_ enabled: Bool) {
+        guard enabled != isEnabled else { return }
+        isEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
+        if enabled {
+            start()
+        } else {
+            stop()
+        }
+    }
+
     func start() {
+        guard isEnabled else { return }
         controller.onTrackInfoReceived = { [weak self] info in
             MainActor.assumeIsolated { self?.apply(info) }
         }
@@ -124,6 +140,16 @@ final class NowPlayingModel {
             MainActor.assumeIsolated { self?.restartListening() }
         }
         controller.startListening()
+    }
+
+    /// Stops listening, and what was playing leaves the island. The
+    /// listener's ending would otherwise start it again, so that goes
+    /// first.
+    func stop() {
+        controller.onListenerTerminated = nil
+        controller.onTrackInfoReceived = nil
+        controller.stopListening()
+        apply(nil)
     }
 
     func elapsed(at date: Date) -> TimeInterval {
@@ -234,7 +260,8 @@ final class NowPlayingModel {
     private func restartListening() {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
-            self?.controller.startListening()
+            guard let self, self.isEnabled else { return }
+            self.controller.startListening()
         }
     }
 

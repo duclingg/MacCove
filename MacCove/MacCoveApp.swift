@@ -72,6 +72,11 @@ struct MacCoveApp: App {
             SettingsView()
                 .frame(width: 800, height: 600)
                 .environment(appDelegate.github)
+                .environment(appDelegate.nowPlaying)
+                .environment(appDelegate.battery)
+                .environment(appDelegate.signIn)
+                .environment(appDelegate.clipboard)
+                .environment(appDelegate.calendar)
         }
         .windowResizability(.contentSize)
     }

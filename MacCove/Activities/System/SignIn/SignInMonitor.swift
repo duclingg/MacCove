@@ -24,6 +24,10 @@ final class SignInMonitor {
 
     private(set) var prompt: Prompt?
 
+    static let enabledKey = "TouchIDSignInEnabled"
+    /// On until it's turned off in Settings.
+    private(set) var isEnabled = UserDefaults.standard.object(forKey: SignInMonitor.enabledKey) as? Bool ?? true
+
     @ObservationIgnored var onChange: ((Prompt?) -> Void)?
 
     private static let unlockedDuration: Duration = .seconds(1.6)
@@ -32,7 +36,19 @@ final class SignInMonitor {
     @ObservationIgnored private var isScreenLocked = false
     @ObservationIgnored private var lockObservers: [NSObjectProtocol] = []
 
+    func setEnabled(_ enabled: Bool) {
+        guard enabled != isEnabled else { return }
+        isEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
+        if enabled {
+            start()
+        } else {
+            stop()
+        }
+    }
+
     func start() {
+        guard isEnabled, lockObservers.isEmpty else { return }
         // Posted by loginwindow to every app as the screen locks and unlocks.
         let center = DistributedNotificationCenter.default()
         for (name, locked) in [("com.apple.screenIsLocked", true), ("com.apple.screenIsUnlocked", false)] {
@@ -40,6 +56,18 @@ final class SignInMonitor {
                 MainActor.assumeIsolated { self?.screenLockChanged(locked: locked) }
             })
         }
+    }
+
+    /// Stops watching the lock screen, and anything shown leaves.
+    func stop() {
+        let center = DistributedNotificationCenter.default()
+        for observer in lockObservers {
+            center.removeObserver(observer)
+        }
+        lockObservers = []
+        unlockTask?.cancel()
+        isScreenLocked = false
+        setPrompt(nil)
     }
 
     /// Unlocking can only mean the password or Touch ID was accepted.
