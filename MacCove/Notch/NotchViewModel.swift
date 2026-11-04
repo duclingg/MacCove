@@ -30,8 +30,8 @@ enum IslandActivity: Hashable {
     case xcode
     /// A terminal command that's taking a while, then how it ended.
     case terminal
-    /// A Claude Code or Codex session: working, waiting for approval,
-    /// finished.
+    /// A Claude Code, Codex or Cursor session: working, waiting for
+    /// approval, finished.
     case claudeCode
     /// A pull request's checks, or a review someone asked you for.
     case github

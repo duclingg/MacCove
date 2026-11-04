@@ -177,4 +177,26 @@ private let codexApproval = ClaudeCodeMonitor.Approval(
 #Preview("Codex finished, expanded") {
     expanded(codex(.finished))
 }
+
+// MARK: Cursor
+
+/// Its own agent, in Cursor's app: no task list, and no Stop.
+private func cursor(_ phase: ClaudeCodeMonitor.Phase) -> ClaudeCodeMonitor.Session {
+    var result = session(phase, tasksDone: 0, taskCount: 0)
+    result.agent = .cursor
+    result.activity = "Running swift test"
+    return result
+}
+
+#Preview("Cursor working") {
+    compact(cursor(.working))
+}
+
+#Preview("Cursor working, expanded") {
+    expanded(cursor(.working))
+}
+
+#Preview("Cursor finished, expanded") {
+    expanded(cursor(.finished))
+}
 #endif

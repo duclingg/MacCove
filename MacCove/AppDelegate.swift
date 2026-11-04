@@ -103,10 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         downloads.start()
         updates.startAutomaticChecks()
         
-        // Hook events from Claude Code and Codex, whose sessions the one
-        // monitor keeps apart by the agent their path starts with.
+        // Hook events from Claude Code, Codex and Cursor, whose sessions the
+        // one monitor keeps apart by the agent their path starts with.
         let bridge = AgentBridge { [weak claude] request in
-            guard request.path.hasPrefix("/claude/") || request.path.hasPrefix("/codex/"), let claude else { return .empty }
+            let agents = ["/claude/", "/codex/", "/cursor/"]
+            guard agents.contains(where: { request.path.hasPrefix($0) }), let claude else { return .empty }
             return await claude.handle(request)
         }
         do {

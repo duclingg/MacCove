@@ -34,11 +34,17 @@ enum AITool: String, CaseIterable {
         }
     }
     
+    /// Whether Esc in its terminal stops a turn, as the notch's Stop does.
+    /// Cursor's agent mostly runs in its own app, where it doesn't.
+    var canStop: Bool {
+        self != .cursor
+    }
+
     var path: String {
         switch self {
         case .claude: "~/.claude/settings.json"
         case .codex: "~/.codex/hooks.json"
-        case .cursor: "~/.cursor/config.json"
+        case .cursor: "~/.cursor/hooks.json"
         }
     }
 }

@@ -16,6 +16,7 @@ import Foundation
 enum ScriptsFolder: String {
     case claudeCode = "ClaudeCode"
     case codex = "Codex"
+    case cursor = "Cursor"
     case terminal = "Terminal"
     case xcode = "Xcode"
 

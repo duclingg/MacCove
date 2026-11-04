@@ -15,7 +15,8 @@ extension Color {
 
 extension AITool {
     /// The ring, the chosen option and the button that answers. Codex's
-    /// brand is black and white, so it's white on the notch.
+    /// and Cursor's brands are black and white, so theirs is white on the
+    /// notch.
     var accent: Color {
         switch self {
         case .claude: .claudeCode
@@ -30,8 +31,9 @@ struct AgentIcon: View {
     let size: CGFloat
 
     /// Filled to its edges, as the notch's art, unlike `ToolIcon`, which
-    /// pads it to sit beside other apps' icons. Codex's bare logo goes on
-    /// a white tile, its light version, which stands out on the notch.
+    /// pads it to sit beside other apps' icons. Codex's and Cursor's bare
+    /// logos go on a tile in their light versions, which stand out on the
+    /// notch.
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
         Group {
@@ -44,15 +46,18 @@ struct AgentIcon: View {
                     .frame(width: size, height: size)
                     .clipShape(shape)
             case .codex, .cursor:
-                Image(agent == .codex ? "Codex" : "Cursor")
+                // As `ToolIcon` has them: OpenAI's black on white, and
+                // Cursor's brand kit's light version.
+                let isCodex = agent == .codex
+                Image(isCodex ? "Codex" : "Cursor")
                     .renderingMode(.template)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
-                    .foregroundStyle(.black)
+                    .foregroundStyle(isCodex ? Color.black : Color(red: 0x14 / 255, green: 0x12 / 255, blue: 0x0B / 255))
                     .frame(width: size * 0.64, height: size * 0.64)
                     .frame(width: size, height: size)
-                    .background(.white, in: shape)
+                    .background(isCodex ? Color.white : Color(red: 0xF0 / 255, green: 0xEF / 255, blue: 0xEA / 255), in: shape)
             }
         }
         .accessibilityHidden(true)
@@ -335,7 +340,7 @@ struct ClaudeCodeExpandedView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
 
-            if session.phase == .working {
+            if session.phase == .working, session.agent.canStop {
                 Button {
                     claude.stop()
                 } label: {
