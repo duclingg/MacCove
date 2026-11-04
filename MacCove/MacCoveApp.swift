@@ -23,6 +23,7 @@ struct MacCoveApp: App {
             SettingsView()
                 .frame(width: 800, height: 600)
                 .environment(appDelegate.github)
+                .environment(appDelegate.downloads)
                 .environment(appDelegate.nowPlaying)
                 .environment(appDelegate.battery)
                 .environment(appDelegate.signIn)

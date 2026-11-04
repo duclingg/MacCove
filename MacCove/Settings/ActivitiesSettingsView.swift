@@ -18,6 +18,7 @@ struct ActivitiesSettingsView: View {
     @Environment(DeviceBatteryMonitor.self) private var deviceBatteries
     @Environment(MirrorCamera.self) private var mirror
     @Environment(FileShelf.self) private var shelf
+    @Environment(DownloadMonitor.self) private var downloads
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
     @Environment(NotchCommands.self) private var notch
     @State private var isClipboardRestricted = false
@@ -106,6 +107,14 @@ struct ActivitiesSettingsView: View {
                         Text("Opens in the notch")
                     }
                 }
+                activityToggle(
+                    "Downloads",
+                    detail: "Files coming into Downloads from Safari and browsers built on Chrome, then a check once they’re done",
+                    isOn: Binding(
+                        get: { downloads.isEnabled },
+                        set: { downloads.setEnabled($0) }
+                    )
+                )
                 activityToggle("Device batteries", detail: deviceBatteriesDetail, isOn: Binding(
                     get: { deviceBatteries.isEnabled },
                     set: { deviceBatteries.setEnabled($0) }
@@ -330,6 +339,7 @@ struct ActivitiesSettingsView: View {
         .environment(DeviceBatteryMonitor())
         .environment(MirrorCamera())
         .environment(FileShelf(loadsSaved: false))
+        .environment(DownloadMonitor())
         .environment(NotchCommands())
 }
 #endif
