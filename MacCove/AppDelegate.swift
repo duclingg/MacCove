@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let xcode = XcodeBuildMonitor()
         let terminal = TerminalCommandMonitor()
-        let claude = ClaudeCodeMonitor()
+        let agents = AgentMonitor()
         self.xcode = xcode
         self.terminal = terminal
         let viewModel = NotchViewModel(
@@ -64,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             signIn: signIn,
             xcode: xcode,
             terminal: terminal,
-            claude: claude,
+            agents: agents,
             github: github,
             downloads: downloads,
             clipboard: clipboard,
@@ -105,10 +105,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Hook events from Claude Code, Codex and Cursor, whose sessions the
         // one monitor keeps apart by the agent their path starts with.
-        let bridge = AgentBridge { [weak claude] request in
-            let agents = ["/claude/", "/codex/", "/cursor/"]
-            guard agents.contains(where: { request.path.hasPrefix($0) }), let claude else { return .empty }
-            return await claude.handle(request)
+        let bridge = AgentBridge { [weak agents] request in
+            let prefixes = ["/claude/", "/codex/", "/cursor/"]
+            guard prefixes.contains(where: { request.path.hasPrefix($0) }), let agents else { return .empty }
+            return await agents.handle(request)
         }
         do {
             try bridge.start()

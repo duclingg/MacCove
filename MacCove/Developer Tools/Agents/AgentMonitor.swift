@@ -1,5 +1,5 @@
 //
-//  ClaudeCodeMonitor.swift
+//  AgentMonitor.swift
 //  MacCove
 //
 //  Created by Justin Hoang on 11/2/26.
@@ -19,7 +19,7 @@ import AppKit
 /// agent as the hook's. Claude Code and Codex take a permission decision
 /// in the same shape; Cursor's hooks only report.
 @Observable
-final class ClaudeCodeMonitor {
+final class AgentMonitor {
     enum Event {
         case started
         /// A permission request, question or plan is waiting on the island.
@@ -812,10 +812,10 @@ final class ClaudeCodeMonitor {
 }
 
 #if DEBUG
-extension ClaudeCodeMonitor {
+extension AgentMonitor {
     /// A session that stays as given, for SwiftUI previews.
-    static func preview(_ session: Session) -> ClaudeCodeMonitor {
-        let monitor = ClaudeCodeMonitor()
+    static func preview(_ session: Session) -> AgentMonitor {
+        let monitor = AgentMonitor()
         monitor.sessions[session.id] = session
         return monitor
     }

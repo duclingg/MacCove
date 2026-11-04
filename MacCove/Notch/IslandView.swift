@@ -120,8 +120,8 @@ struct IslandView: View {
                 case .terminal?:
                     TerminalCompactView(terminal: viewModel.terminal, notchSize: notch)
                         .transition(.islandContent)
-                case .claudeCode?:
-                    ClaudeCodeCompactView(claude: viewModel.claude, notchSize: notch)
+                case .codingAgent?:
+                    AgentCompactView(agents: viewModel.agents, notchSize: notch)
                         .transition(.islandContent)
                 case .github?:
                     GitHubCompactView(github: viewModel.github, notchSize: notch)
@@ -177,8 +177,8 @@ struct IslandView: View {
                 case .terminal?:
                     TerminalExpandedView(terminal: viewModel.terminal, notchHeight: notch.height)
                         .transition(.islandContent)
-                case .claudeCode?:
-                    ClaudeCodeExpandedView(claude: viewModel.claude, notchHeight: notch.height)
+                case .codingAgent?:
+                    AgentExpandedView(agents: viewModel.agents, notchHeight: notch.height)
                         .transition(.islandContent)
                 case .github?:
                     GitHubExpandedView(github: viewModel.github, notchHeight: notch.height)
@@ -309,8 +309,8 @@ private struct IslandBubbleView: View {
             XcodeMinimalView(xcode: viewModel.xcode, notchSize: viewModel.notchSize)
         case .terminal:
             TerminalMinimalView(terminal: viewModel.terminal, notchSize: viewModel.notchSize)
-        case .claudeCode:
-            ClaudeCodeMinimalView(claude: viewModel.claude, notchSize: viewModel.notchSize)
+        case .codingAgent:
+            AgentMinimalView(agents: viewModel.agents, notchSize: viewModel.notchSize)
         case .github:
             GitHubMinimalView(github: viewModel.github, notchSize: viewModel.notchSize)
         case .downloads:
