@@ -76,6 +76,15 @@ final class GitHubMonitor {
     private(set) var needsSignIn = false
     /// Merge or Re-run Failed is on its way.
     private(set) var isActing = false
+    /// The merge method picked for what's shown; `nil` for the usual one.
+    private(set) var selectedMergeMethod: GitHubMergeMethod?
+    /// Merge was clicked once, and a second click within a few seconds
+    /// merges.
+    private(set) var isConfirmingMerge = false
+    /// Why GitHub wouldn't merge, until the next try.
+    private(set) var mergeError: String?
+    /// What the rulesets on each base branch say, by `branchKey`.
+    private(set) var branchRules: [String: GitHubBranchRules] = [:]
 
     @ObservationIgnored var onEvent: ((Event) -> Void)?
     /// Whether the notch is open or under the cursor, when a passed result
@@ -106,6 +115,8 @@ final class GitHubMonitor {
     /// Takes away a passed result after a moment.
     @ObservationIgnored private var passedDismissal: Task<Void, Never>?
     @ObservationIgnored private var duePassedKey: String?
+    @ObservationIgnored private var confirmTask: Task<Void, Never>?
+    @ObservationIgnored private var branchRulesFetchedAt: [String: Date] = [:]
 
     private static let activeInterval: Duration = .seconds(30)
     private static let idleInterval: Duration = .seconds(60)
@@ -118,6 +129,10 @@ final class GitHubMonitor {
     /// How long after a push to keep looking for its checks.
     private static let expectingWindow: TimeInterval = 120
     private static let passedDuration: Duration = .seconds(6)
+    /// How long Merge waits for the second click.
+    private static let confirmDuration: Duration = .seconds(4)
+    /// Rulesets are looked up again after this.
+    private static let branchRulesLifetime: TimeInterval = 600
 
     // MARK: - Polling
 
@@ -143,6 +158,8 @@ final class GitHubMonitor {
         changedAt = [:]
         dismissed = []
         seenReviewIDs = []
+        branchRules = [:]
+        branchRulesFetchedAt = [:]
         hasBaseline = false
         update()
     }
@@ -395,11 +412,17 @@ final class GitHubMonitor {
         activity = next
         defer { newFailures.removeAll() }
 
+        if previous?.key != next?.key {
+            resetMerge()
+        }
         guard let next else {
             if previous != nil { onEvent?(.ended) }
             return
         }
         guard previous?.key != next.key else { return }
+        if next.phase == .ready {
+            fetchBranchRules(for: next.pullRequest)
+        }
         if next.phase == .passed {
             scheduleLeaving(next.key)
         }
@@ -468,24 +491,117 @@ final class GitHubMonitor {
         }
     }
 
-    /// Merges the way GitHub's own button would. If GitHub won't, the
-    /// pull request opens in the browser, which says why.
+    // MARK: - Merging
+
+    private static func branchKey(_ pullRequest: GitHubPullRequest) -> String {
+        "\(pullRequest.repository):\(pullRequest.baseBranch)"
+    }
+
+    /// The base branch's rulesets, once they've been looked up.
+    func rules(for pullRequest: GitHubPullRequest) -> GitHubBranchRules? {
+        branchRules[Self.branchKey(pullRequest)]
+    }
+
+    /// What the repository's settings and the base branch's rulesets both
+    /// allow, in GitHub's order. Empty until the rulesets are known.
+    func mergeMethods(for pullRequest: GitHubPullRequest) -> [GitHubMergeMethod] {
+        guard let rules = rules(for: pullRequest) else { return [] }
+        return pullRequest.mergeMethods.filter { method in
+            if rules.requiresLinearHistory, method == .merge { return false }
+            return rules.allowedMergeMethods?.contains(method) ?? true
+        }
+    }
+
+    /// The one picked, else GitHub's usual one, else the first allowed.
+    func mergeMethod(for pullRequest: GitHubPullRequest) -> GitHubMergeMethod? {
+        let methods = mergeMethods(for: pullRequest)
+        if let selectedMergeMethod, methods.contains(selectedMergeMethod) { return selectedMergeMethod }
+        if let usual = pullRequest.defaultMergeMethod, methods.contains(usual) { return usual }
+        return methods.first
+    }
+
+    func selectMergeMethod(_ method: GitHubMergeMethod) {
+        guard !isActing else { return }
+        selectedMergeMethod = method
+        mergeError = nil
+        cancelConfirming()
+    }
+
+    /// Looked up when a pull request is ready to merge, and again after
+    /// ten minutes. If GitHub won't say, nothing is taken to be limited:
+    /// GitHub still turns down a merge the rules forbid, and the reason
+    /// shows in the notch.
+    private func fetchBranchRules(for pullRequest: GitHubPullRequest) {
+        let key = Self.branchKey(pullRequest)
+        if let fetchedAt = branchRulesFetchedAt[key], Date.now.timeIntervalSince(fetchedAt) < Self.branchRulesLifetime { return }
+        branchRulesFetchedAt[key] = .now
+        Task {
+            var rules = GitHubBranchRules()
+            if let token = await currentToken() {
+                rules = (try? await GitHubAPI(token: token).branchRules(repository: pullRequest.repository, branch: pullRequest.baseBranch)) ?? rules
+            }
+            branchRules[key] = rules
+        }
+    }
+
+    /// The first click asks for a second, so a stray one never merges.
+    /// The second merges with the method picked, or adds it to the merge
+    /// queue where the branch has one. If GitHub won't, the reason stays
+    /// in the notch.
     func merge() {
-        guard let activity, activity.phase == .ready, !isActing else { return }
+        guard let activity, activity.phase == .ready, activity.pullRequest.canMerge, !isActing else { return }
+        let pullRequest = activity.pullRequest
+        let usesQueue = rules(for: pullRequest)?.usesMergeQueue == true
+        let method = mergeMethod(for: pullRequest)
+        guard usesQueue || method != nil else { return }
+
+        guard isConfirmingMerge else {
+            mergeError = nil
+            isConfirmingMerge = true
+            confirmTask?.cancel()
+            confirmTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.confirmDuration)
+                guard !Task.isCancelled else { return }
+                self?.isConfirmingMerge = false
+            }
+            return
+        }
+        cancelConfirming()
         isActing = true
         Task {
             defer { isActing = false }
             guard let token = await currentToken() else { return }
+            let api = GitHubAPI(token: token)
             do {
-                try await GitHubAPI(token: token).merge(activity.pullRequest)
+                if usesQueue {
+                    try await api.enqueue(pullRequest)
+                } else if let method {
+                    try await api.merge(pullRequest, method: method)
+                }
             } catch {
-                NSWorkspace.shared.open(activity.pullRequest.url)
+                if self.activity?.key == activity.key {
+                    mergeError = error.localizedDescription
+                }
+                return
             }
             if self.activity?.key == activity.key {
                 dismiss()
             }
             poll(after: .seconds(2))
         }
+    }
+
+    private func cancelConfirming() {
+        confirmTask?.cancel()
+        confirmTask = nil
+        isConfirmingMerge = false
+    }
+
+    /// Something else is shown: its own choices start afresh.
+    private func resetMerge() {
+        cancelConfirming()
+        selectedMergeMethod = nil
+        mergeError = nil
     }
 
     private static func failedRuns(of pullRequest: GitHubPullRequest) -> [Int] {
@@ -563,6 +679,7 @@ extension GitHubMonitor {
         let monitor = GitHubMonitor()
         monitor.activity = activity
         monitor.tokenProvider = { nil }
+        monitor.branchRules[branchKey(activity.pullRequest)] = GitHubBranchRules()
         return monitor
     }
 }

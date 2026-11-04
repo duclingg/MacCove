@@ -346,7 +346,7 @@ final class NotchViewModel {
             case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
             case .claudeCode?: ClaudeCodeExpandedView.bodyHeight(for: claude.session)
-            case .github?: GitHubExpandedView.bodyHeight(for: github.activity)
+            case .github?: GitHubExpandedView.bodyHeight(for: github)
             case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
             default: BatteryExpandedView.bodyHeight
             }

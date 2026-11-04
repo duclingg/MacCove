@@ -64,8 +64,13 @@ nonisolated struct GitHubPullRequest: Equatable, Identifiable, Sendable {
     let changedFiles: Int
     /// The viewer can write to the repository, so Merge can work.
     let canMerge: Bool
-    /// MERGE, SQUASH or REBASE: what GitHub's own button would do.
-    let mergeMethod: String
+    /// What the repository's settings allow. The base branch's rulesets
+    /// can narrow it further; see `GitHubBranchRules`.
+    let mergeMethods: [GitHubMergeMethod]
+    /// What GitHub's own button would do.
+    let defaultMergeMethod: GitHubMergeMethod?
+    /// The branch it merges into, whose rulesets apply.
+    let baseBranch: String
     /// The last few reviews, oldest first; only for your own.
     var reviews: [Review] = []
 
@@ -73,6 +78,21 @@ nonisolated struct GitHubPullRequest: Equatable, Identifiable, Sendable {
     var repositoryName: String {
         repository.split(separator: "/").last.map(String.init) ?? repository
     }
+}
+
+nonisolated enum GitHubMergeMethod: String, CaseIterable, Sendable {
+    case merge = "MERGE"
+    case squash = "SQUASH"
+    case rebase = "REBASE"
+}
+
+/// What the rulesets on a branch say about merging into it.
+nonisolated struct GitHubBranchRules: Equatable, Sendable {
+    /// `nil` when no ruleset limits them.
+    var allowedMergeMethods: Set<GitHubMergeMethod>?
+    var requiresLinearHistory = false
+    /// Pull requests go through the merge queue rather than straight in.
+    var usesMergeQueue = false
 }
 
 /// What one poll found.
@@ -127,10 +147,33 @@ nonisolated struct GitHubAPI: Sendable {
 
     // MARK: - Acting
 
-    /// Merges the way GitHub's own button would, and only the commit whose
-    /// checks were shown passing.
-    func merge(_ pullRequest: GitHubPullRequest) async throws {
-        var variables: [String: Any] = ["id": pullRequest.id, "method": pullRequest.mergeMethod]
+    /// The rulesets that apply to a branch, the organization's included.
+    func branchRules(repository: String, branch: String) async throws -> GitHubBranchRules {
+        let branchPath = branch.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? branch
+        let url = URL(string: "https://api.github.com/repos/\(repository)/rules/branches/\(branchPath)?per_page=100")!
+        let (data, response) = try await URLSession.shared.data(for: request(url))
+        try Self.check(response)
+        var rules = GitHubBranchRules()
+        for rule in try Self.decoder.decode([BranchRule].self, from: data) {
+            switch rule.type {
+            case "pull_request":
+                guard let names = rule.parameters?.allowed_merge_methods else { continue }
+                let methods = Set(names.compactMap { GitHubMergeMethod(rawValue: $0.uppercased()) })
+                rules.allowedMergeMethods = rules.allowedMergeMethods.map { $0.intersection(methods) } ?? methods
+            case "required_linear_history":
+                rules.requiresLinearHistory = true
+            case "merge_queue":
+                rules.usesMergeQueue = true
+            default:
+                break
+            }
+        }
+        return rules
+    }
+
+    /// Merges only the commit whose checks were shown passing.
+    func merge(_ pullRequest: GitHubPullRequest, method: GitHubMergeMethod) async throws {
+        var variables: [String: Any] = ["id": pullRequest.id, "method": method.rawValue]
         if let sha = pullRequest.headSHA {
             variables["head"] = sha
         }
@@ -138,6 +181,22 @@ nonisolated struct GitHubAPI: Sendable {
             mutation($id: ID!, $method: PullRequestMergeMethod!, $head: GitObjectID) {
               mergePullRequest(input: {pullRequestId: $id, mergeMethod: $method, expectedHeadOid: $head}) {
                 pullRequest { merged }
+              }
+            }
+            """, variables: variables)
+    }
+
+    /// Adds it to the base branch's merge queue, which merges it the way
+    /// the queue is set up to.
+    func enqueue(_ pullRequest: GitHubPullRequest) async throws {
+        var variables: [String: Any] = ["id": pullRequest.id]
+        if let sha = pullRequest.headSHA {
+            variables["head"] = sha
+        }
+        let _: MergeResponse = try await graphQL("""
+            mutation($id: ID!, $head: GitObjectID) {
+              enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) {
+                mergeQueueEntry { id }
               }
             }
             """, variables: variables)
@@ -233,7 +292,11 @@ nonisolated struct GitHubAPI: Sendable {
 
         fragment Basics on PullRequest {
           id number title url isDraft additions deletions changedFiles
-          repository { nameWithOwner viewerPermission viewerDefaultMergeMethod }
+          baseRefName
+          repository {
+            nameWithOwner viewerPermission viewerDefaultMergeMethod
+            mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
+          }
         }
 
         fragment Authored on PullRequest {
@@ -291,6 +354,17 @@ nonisolated private struct ViewerResponse: Decodable {
 
 nonisolated private struct MergeResponse: Decodable {}
 
+/// One rule from the rules-for-a-branch endpoint.
+nonisolated private struct BranchRule: Decodable {
+    nonisolated struct Parameters: Decodable {
+        // As the REST API spells it.
+        let allowed_merge_methods: [String]?
+    }
+
+    let type: String
+    let parameters: Parameters?
+}
+
 nonisolated private struct Nodes<Node: Decodable>: Decodable {
     let nodes: [Node?]
 }
@@ -310,6 +384,11 @@ nonisolated private struct PullRequestNode: Decodable {
         let nameWithOwner: String
         let viewerPermission: String?
         let viewerDefaultMergeMethod: String?
+        let mergeCommitAllowed: Bool?
+        let squashMergeAllowed: Bool?
+        let rebaseMergeAllowed: Bool?
+    }
+
     }
 
     nonisolated struct Review: Decodable {
@@ -458,6 +537,7 @@ nonisolated private struct PullRequestNode: Decodable {
     let deletions: Int?
     let changedFiles: Int?
     let repository: Repository?
+    let baseRefName: String?
     let reviewDecision: String?
     let mergeable: String?
     let latestOpinionatedReviews: Nodes<Review>?
@@ -469,6 +549,10 @@ nonisolated private struct PullRequestNode: Decodable {
         let commit = commits?.nodes.last??.commit
         let checks = commit?.statusCheckRollup?.contexts.nodes.compactMap { $0?.check } ?? []
         let canMerge = ["ADMIN", "MAINTAIN", "WRITE"].contains(repository.viewerPermission ?? "")
+        var mergeMethods: [GitHubMergeMethod] = []
+        if repository.mergeCommitAllowed == true { mergeMethods.append(.merge) }
+        if repository.squashMergeAllowed == true { mergeMethods.append(.squash) }
+        if repository.rebaseMergeAllowed == true { mergeMethods.append(.rebase) }
         return GitHubPullRequest(
             id: id,
             number: number,
@@ -485,7 +569,9 @@ nonisolated private struct PullRequestNode: Decodable {
             deletions: deletions ?? 0,
             changedFiles: changedFiles ?? 0,
             canMerge: canMerge,
-            mergeMethod: repository.viewerDefaultMergeMethod ?? "MERGE",
+            mergeMethods: mergeMethods,
+            defaultMergeMethod: repository.viewerDefaultMergeMethod.flatMap(GitHubMergeMethod.init),
+            baseBranch: baseRefName ?? "",
             reviews: reviews?.nodes.compactMap { $0?.review } ?? []
         )
     }

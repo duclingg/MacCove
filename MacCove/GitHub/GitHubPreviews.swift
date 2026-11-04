@@ -41,7 +41,9 @@ private func pullRequest(
         deletions: 38,
         changedFiles: 6,
         canMerge: true,
-        mergeMethod: "SQUASH"
+        mergeMethods: [.merge, .squash, .rebase],
+        defaultMergeMethod: .squash,
+        baseBranch: "develop"
     )
 }
 
@@ -110,12 +112,13 @@ private func compact(_ activity: GitHubMonitor.Activity) -> some View {
 }
 
 private func expanded(_ activity: GitHubMonitor.Activity) -> some View {
-    IslandPreview(
-        size: CGSize(width: NotchViewModel.expandedWidth, height: notch.height + GitHubExpandedView.bodyHeight(for: activity)),
+    let github = GitHubMonitor.preview(activity)
+    return IslandPreview(
+        size: CGSize(width: NotchViewModel.expandedWidth, height: notch.height + GitHubExpandedView.bodyHeight(for: github)),
         cornerRadius: NotchViewModel.expandedCornerRadius,
         isLifted: true
     ) {
-        GitHubExpandedView(github: .preview(activity), notchHeight: notch.height)
+        GitHubExpandedView(github: github, notchHeight: notch.height)
     }
 }
 

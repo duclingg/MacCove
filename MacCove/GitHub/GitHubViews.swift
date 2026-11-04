@@ -313,23 +313,37 @@ struct GitHubExpandedView: View {
     private static let reviewLineHeight = reviewFontLineHeight.rounded(.up) + 1
     /// A long review is cut off here; Open Review has the rest.
     private static let reviewLineLimit = 3
+    /// Between the box and the merge methods.
+    private static let methodGap: CGFloat = 10
+    private static let methodRowHeight: CGFloat = 28
 
-    static func bodyHeight(for activity: GitHubMonitor.Activity?) -> CGFloat {
+    static func bodyHeight(for github: GitHubMonitor) -> CGFloat {
         var height = NotchViewModel.expandedTopGap + headerHeight + bottomGap
-        guard let activity else { return height }
+        guard let activity = github.activity else { return height }
         if activity.phase == .running {
             height += barGap + barHeight + footerGap + footerHeight
         } else if activity.phase == .reviewed, let review = activity.review {
             height += codeGap + codePadding.top + reviewBoxHeight(review) + codePadding.bottom
             height += chipsGap + chipHeight
         } else {
-            let lines = codeLines(for: activity).count
+            let lines = codeLines(for: activity, in: github).count
             if lines > 0 {
                 height += codeGap + codePadding.top + codeLineHeight * CGFloat(lines) + codePadding.bottom
+            }
+            if showsMethods(for: activity, in: github) {
+                height += methodGap + methodRowHeight
             }
             height += chipsGap + chipHeight
         }
         return height
+    }
+
+    /// Only when there's a choice to make: the merge queue picks its own.
+    private static func showsMethods(for activity: GitHubMonitor.Activity, in github: GitHubMonitor) -> Bool {
+        let pullRequest = activity.pullRequest
+        guard activity.phase == .ready, pullRequest.canMerge,
+              github.rules(for: pullRequest)?.usesMergeQueue == false else { return false }
+        return github.mergeMethods(for: pullRequest).count > 1
     }
 
     var body: some View {
@@ -344,10 +358,14 @@ struct GitHubExpandedView: View {
                     buttons(activity)
                         .padding(.top, Self.chipsGap)
                 } else {
-                    let lines = Self.codeLines(for: activity)
+                    let lines = Self.codeLines(for: activity, in: github)
                     if !lines.isEmpty {
                         code(lines)
                             .padding(.top, Self.codeGap)
+                    }
+                    if Self.showsMethods(for: activity, in: github) {
+                        methods(activity.pullRequest)
+                            .padding(.top, Self.methodGap)
                     }
                     buttons(activity)
                         .padding(.top, Self.chipsGap)
@@ -508,6 +526,50 @@ struct GitHubExpandedView: View {
         return min(max(lines, 1), reviewLineLimit)
     }
 
+    /// Merge commit, squash or rebase, as the repository and the base
+    /// branch's rulesets allow; the one picked in white.
+    private func methods(_ pullRequest: GitHubPullRequest) -> some View {
+        let chosen = github.mergeMethod(for: pullRequest)
+
+        return HStack(spacing: 6) {
+            ForEach(github.mergeMethods(for: pullRequest), id: \.self) { method in
+                let isChosen = method == chosen
+                Button {
+                    github.selectMergeMethod(method)
+                } label: {
+                    Text(Self.methodName(method))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isChosen ? Color.onWhite : Color.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: Self.methodRowHeight)
+                        .background(Capsule().fill(isChosen ? Color.white : Color.white.opacity(0.08)))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isChosen ? .isSelected : [])
+            }
+        }
+        .disabled(github.isActing)
+    }
+
+    /// Says what the click will do: "Squash and Merge", then "Click to
+    /// Confirm". `nil` when it can't merge at all.
+    private func mergeLabel(_ pullRequest: GitHubPullRequest) -> String? {
+        guard pullRequest.canMerge else { return nil }
+        guard let rules = github.rules(for: pullRequest) else { return "Checking Rules…" }
+        if github.isActing { return rules.usesMergeQueue ? "Adding to Queue…" : "Merging…" }
+        if rules.usesMergeQueue {
+            return github.isConfirmingMerge ? "Click to Confirm" : "Add to Merge Queue"
+        }
+        guard let method = github.mergeMethod(for: pullRequest) else { return nil }
+        if github.isConfirmingMerge { return "Click to Confirm" }
+        return switch method {
+        case .merge: "Merge"
+        case .squash: "Squash and Merge"
+        case .rebase: "Rebase and Merge"
+        }
+    }
+
     @ViewBuilder
     private func buttons(_ activity: GitHubMonitor.Activity) -> some View {
         HStack(spacing: 8) {
@@ -522,10 +584,16 @@ struct GitHubExpandedView: View {
                 chip("View Logs", background: .white, foreground: .onWhite) { github.viewLogs() }
             case .ready:
                 chip("View") { github.openAndDismiss() }
-                if activity.pullRequest.canMerge {
-                    chip(github.isActing ? "Merging…" : "Merge", background: .islandSucceeded, foreground: .onGreen) {
+                if let label = mergeLabel(activity.pullRequest) {
+                    // Orange while it waits for the second click.
+                    chip(
+                        label,
+                        background: github.isConfirmingMerge ? Color.githubChecks : Color.islandSucceeded,
+                        foreground: github.isConfirmingMerge ? Color.onWhite : Color.onGreen
+                    ) {
                         github.merge()
                     }
+                    .disabled(github.rules(for: activity.pullRequest) == nil)
                 }
             case .passed:
                 chip("Dismiss") { github.dismiss() }
@@ -592,9 +660,19 @@ struct GitHubExpandedView: View {
         }
     }
 
-    /// Failed: each failed check in red, then how many passed. Passed: the
+    private static func methodName(_ method: GitHubMergeMethod) -> String {
+        switch method {
+        case .merge: "Merge Commit"
+        case .squash: "Squash"
+        case .rebase: "Rebase"
+        }
+    }
+
+    /// Failed: each failed check in red, then how many passed. Ready: the
+    /// checks and approvals, the merge queue or why merging can't happen
+    /// here, and what GitHub said when it wouldn't merge. Passed: the
     /// count, and what it still waits on. Review: the size of the change.
-    private static func codeLines(for activity: GitHubMonitor.Activity) -> [CodeLine] {
+    private static func codeLines(for activity: GitHubMonitor.Activity, in github: GitHubMonitor) -> [CodeLine] {
         let pullRequest = activity.pullRequest
         let checks = pullRequest.checks
         let passed = checks.filter { $0.status == .passed }.count
@@ -618,6 +696,16 @@ struct GitHubExpandedView: View {
                 text += "  ·  \(plural(pullRequest.approvals, "approval"))"
             }
             lines.append((text, Color.islandSucceeded))
+            if pullRequest.canMerge, let rules = github.rules(for: pullRequest) {
+                if rules.usesMergeQueue {
+                    lines.append(("Merges through the merge queue", Color.codeText))
+                } else if github.mergeMethods(for: pullRequest).isEmpty {
+                    lines.append(("No way to merge that the rules allow", Color.codeText))
+                }
+            }
+            if let error = github.mergeError {
+                lines.append(("✕  \(error)", Color.islandError))
+            }
         case .passed:
             lines.append(("✓  \(plural(passed, "check")) passed", Color.islandSucceeded))
             lines.append((waitingOn(pullRequest), Color.codeText))
