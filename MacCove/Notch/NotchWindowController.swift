@@ -258,7 +258,7 @@ final class NotchWindowController {
 
     /// An activity leaves the notch while what it comes from is in front.
     /// Switching tabs doesn't switch apps, so while Terminal or iTerm is in
-    /// front with a command or Claude Code running in it, which tab is in
+    /// front with a command or coding agent running in it, which tab is in
     /// front is asked again every so often.
     private func frontAppChanged() {
         frontTabCheck?.cancel()

@@ -1,5 +1,5 @@
 //
-//  ClaudeCodePreviews.swift
+//  AgentPreviews.swift
 //  MacCove
 //
 //  Created by Justin Hoang on 11/2/26.
@@ -10,8 +10,8 @@ import SwiftUI
 
 private let notch = CGSize(width: 186, height: 37)
 
-private func session(_ phase: ClaudeCodeMonitor.Phase, tasksDone: Int = 3, taskCount: Int = 5) -> ClaudeCodeMonitor.Session {
-    var session = ClaudeCodeMonitor.Session(
+private func session(_ phase: AgentMonitor.Phase, tasksDone: Int = 3, taskCount: Int = 5) -> AgentMonitor.Session {
+    var session = AgentMonitor.Session(
         id: "preview",
         folder: "/Users/me/Developer/MacCove",
         task: "Hide island on external displays",
@@ -29,13 +29,13 @@ private func session(_ phase: ClaudeCodeMonitor.Phase, tasksDone: Int = 3, taskC
     return session
 }
 
-private let approval = ClaudeCodeMonitor.Approval(
+private let approval = AgentMonitor.Approval(
     title: "Allow Bash command?",
     detail: ["$ git commit -m \"Hide island on external displays\""],
     alwaysAllow: ["type": "addRules", "rules": [["toolName": "Bash", "ruleContent": "git commit:*"]], "behavior": "allow", "destination": "localSettings"]
 )
 
-private let question = ClaudeCodeMonitor.question(from: [
+private let question = AgentMonitor.question(from: [
     "questions": [
         [
             "header": "Notch width",
@@ -59,7 +59,7 @@ private let question = ClaudeCodeMonitor.question(from: [
     ],
 ])!
 
-private let plan = ClaudeCodeMonitor.plan(from: [
+private let plan = AgentMonitor.plan(from: [
     "plan": """
         # Hide the island on external displays
 
@@ -70,75 +70,77 @@ private let plan = ClaudeCodeMonitor.plan(from: [
     "planFilePath": "/Users/me/.claude/plans/hide-island.md",
 ])
 
-private func compact(_ session: ClaudeCodeMonitor.Session) -> some View {
+private func compact(_ session: AgentMonitor.Session) -> some View {
     IslandPreview(
         size: CGSize(width: NotchViewModel.compactWidth(notch: notch), height: notch.height),
         cornerRadius: NotchViewModel.compactCornerRadius
     ) {
-        ClaudeCodeCompactView(claude: .preview(session), notchSize: notch)
+        AgentCompactView(agents: .preview(session), notchSize: notch)
     }
 }
 
-private func expanded(_ session: ClaudeCodeMonitor.Session) -> some View {
+private func expanded(_ session: AgentMonitor.Session) -> some View {
     IslandPreview(
-        size: CGSize(width: NotchViewModel.expandedWidth, height: notch.height + ClaudeCodeExpandedView.bodyHeight(for: session)),
+        size: CGSize(width: NotchViewModel.expandedWidth, height: notch.height + AgentExpandedView.bodyHeight(for: session)),
         cornerRadius: NotchViewModel.expandedCornerRadius,
         isLifted: true
     ) {
-        ClaudeCodeExpandedView(claude: .preview(session), notchHeight: notch.height)
+        AgentExpandedView(agents: .preview(session), notchHeight: notch.height)
     }
 }
 
-#Preview("Working") {
+// MARK: Claude Code
+
+#Preview("Claude Code working") {
     compact(session(.working))
 }
 
-#Preview("Working, no task list") {
+#Preview("Claude Code working, no task list") {
     compact(session(.working, tasksDone: 0, taskCount: 0))
 }
 
-#Preview("Needs approval") {
+#Preview("Claude Code needs approval") {
     compact(session(.approval(approval)))
 }
 
-#Preview("Finished") {
+#Preview("Claude Code finished") {
     compact(session(.finished))
 }
 
-#Preview("Working, expanded") {
+#Preview("Claude Code working, expanded") {
     expanded(session(.working))
 }
 
-#Preview("Working without a task list, expanded") {
+#Preview("Claude Code working without a task list, expanded") {
     expanded(session(.working, tasksDone: 0, taskCount: 0))
 }
 
-#Preview("Needs approval, expanded") {
+#Preview("Claude Code needs approval, expanded") {
     expanded(session(.approval(approval)))
 }
 
-#Preview("Question, expanded") {
+#Preview("Claude Code question, expanded") {
     expanded(session(.question(question)))
 }
 
-#Preview("Multiple choice, expanded") {
+#Preview("Claude Code multiple choice, expanded") {
     var second = question
     second.index = 1
     second.selected = ["Built-in"]
     return expanded(session(.question(second)))
 }
 
-#Preview("Plan, expanded") {
+#Preview("Claude Code plan, expanded") {
     expanded(session(.plan(plan)))
 }
 
-#Preview("Finished, expanded") {
+#Preview("Claude Code finished, expanded") {
     expanded(session(.finished))
 }
 
 // MARK: Codex
 
-private func codex(_ phase: ClaudeCodeMonitor.Phase) -> ClaudeCodeMonitor.Session {
+private func codex(_ phase: AgentMonitor.Phase) -> AgentMonitor.Session {
     var result = session(phase, tasksDone: 2, taskCount: 4)
     result.agent = .codex
     result.activity = "Editing NotchWindowController.swift"
@@ -156,9 +158,9 @@ private let patch: [String: Any] = [
         """,
 ]
 
-private let codexApproval = ClaudeCodeMonitor.Approval(
-    title: ClaudeCodeMonitor.approvalTitle(tool: "apply_patch", input: patch),
-    detail: ClaudeCodeMonitor.approvalDetail(tool: "apply_patch", input: patch),
+private let codexApproval = AgentMonitor.Approval(
+    title: AgentMonitor.approvalTitle(tool: "apply_patch", input: patch),
+    detail: AgentMonitor.approvalDetail(tool: "apply_patch", input: patch),
     alwaysAllow: nil
 )
 
@@ -176,5 +178,27 @@ private let codexApproval = ClaudeCodeMonitor.Approval(
 
 #Preview("Codex finished, expanded") {
     expanded(codex(.finished))
+}
+
+// MARK: Cursor
+
+/// Its own agent, in Cursor's app: no task list, and no Stop.
+private func cursor(_ phase: AgentMonitor.Phase) -> AgentMonitor.Session {
+    var result = session(phase, tasksDone: 0, taskCount: 0)
+    result.agent = .cursor
+    result.activity = "Running swift test"
+    return result
+}
+
+#Preview("Cursor working") {
+    compact(cursor(.working))
+}
+
+#Preview("Cursor working, expanded") {
+    expanded(cursor(.working))
+}
+
+#Preview("Cursor finished, expanded") {
+    expanded(cursor(.finished))
 }
 #endif

@@ -30,9 +30,9 @@ enum IslandActivity: Hashable {
     case xcode
     /// A terminal command that's taking a while, then how it ended.
     case terminal
-    /// A Claude Code or Codex session: working, waiting for approval,
-    /// finished.
-    case claudeCode
+    /// A Claude Code, Codex or Cursor session: working, waiting for
+    /// approval, finished.
+    case codingAgent
     /// A pull request's checks, or a review someone asked you for.
     case github
     /// Files coming into the Downloads folder, then the last one done.
@@ -58,7 +58,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .github, .downloads, .clipboard, .calendar, .reminders, .deviceBatteries, .mirror, .shelf, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .codingAgent, .github, .downloads, .clipboard, .calendar, .reminders, .deviceBatteries, .mirror, .shelf, .nowPlaying: .zero
         }
     }
 }
@@ -112,7 +112,7 @@ final class NotchViewModel {
     let signIn: SignInMonitor
     let xcode: XcodeBuildMonitor
     let terminal: TerminalCommandMonitor
-    let claude: ClaudeCodeMonitor
+    let agents: AgentMonitor
     let github: GitHubMonitor
     let downloads: DownloadMonitor
     let clipboard: ClipboardMonitor
@@ -199,7 +199,7 @@ final class NotchViewModel {
         signIn: SignInMonitor,
         xcode: XcodeBuildMonitor,
         terminal: TerminalCommandMonitor,
-        claude: ClaudeCodeMonitor,
+        agents: AgentMonitor,
         github: GitHubMonitor,
         downloads: DownloadMonitor,
         clipboard: ClipboardMonitor,
@@ -215,7 +215,7 @@ final class NotchViewModel {
         self.signIn = signIn
         self.xcode = xcode
         self.terminal = terminal
-        self.claude = claude
+        self.agents = agents
         self.github = github
         self.downloads = downloads
         self.clipboard = clipboard
@@ -244,8 +244,8 @@ final class NotchViewModel {
             guard let self else { return false }
             return self.isHovering || self.presentation == .expanded
         }
-        claude.onEvent = { [weak self] event in
-            self?.claudeEvent(event)
+        agents.onEvent = { [weak self] event in
+            self?.agentEvent(event)
         }
         github.onEvent = { [weak self] event in
             self?.githubEvent(event)
@@ -370,8 +370,8 @@ final class NotchViewModel {
         // moves to a bubble, so it takes no more room than a bubble of its
         // own would, and a bubble can be hidden by the front app's menus.
         var running: [IslandActivity] = []
-        if claude.needsAnswer {
-            running.append(.claudeCode)
+        if agents.needsAnswer {
+            running.append(.codingAgent)
         }
         if isShowingAll, clipboard.shown != nil {
             running.append(.clipboard)
@@ -384,8 +384,8 @@ final class NotchViewModel {
         if isShowingAll, xcode.build != nil {
             running.append(.xcode)
         }
-        if isShowingAll, claude.session != nil, !claude.needsAnswer {
-            running.append(.claudeCode)
+        if isShowingAll, agents.session != nil, !agents.needsAnswer {
+            running.append(.codingAgent)
         }
         if isShowingAll, !downloads.downloads.isEmpty {
             running.append(.downloads)
@@ -512,7 +512,7 @@ final class NotchViewModel {
             case .reminders?: RemindersCompactView.width(for: reminders, notch: notch)
             case .deviceBatteries?: DeviceBatteryCompactView.width(for: deviceBatteries, notch: notch)
             case .shelf?: ShelfCompactView.width(for: shelf, notch: notch)
-            case .claudeCode?: Self.compactWidth(notch: notch)
+            case .codingAgent?: Self.compactWidth(notch: notch)
             default: Self.compactWidth(notch: notch)
             }
             return IslandGeometry(
@@ -525,7 +525,7 @@ final class NotchViewModel {
             case .nowPlaying?: Self.expandedBodyHeight
             case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
-            case .claudeCode?: ClaudeCodeExpandedView.bodyHeight(for: claude.session)
+            case .codingAgent?: AgentExpandedView.bodyHeight(for: agents.session)
             case .github?: GitHubExpandedView.bodyHeight(for: github)
             case .downloads?: DownloadExpandedView.bodyHeight(for: downloads)
             case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
@@ -779,15 +779,15 @@ final class NotchViewModel {
         switch activity {
         // The camera's on while it shows, so its dot stays in sight.
         case .signIn, .charging, .lowBattery, .mirror: false
-        case .claudeCode: !claude.needsAnswer
+        case .codingAgent: !agents.needsAnswer
         case .shelf: shelf.dragPhase == nil
         case .xcode, .terminal, .github, .downloads, .clipboard, .calendar, .reminders, .deviceBatteries, .nowPlaying: true
         }
     }
 
     /// Whether what the activity comes from is in front: Xcode, Calendar,
-    /// Reminders, the app playing, or the terminal tab a command or Claude
-    /// Code runs in. Any tab of that terminal when it can't say which. An
+    /// Reminders, the app playing, or the terminal tab a command or coding
+    /// agent runs in. Any tab of that terminal when it can't say which. An
     /// agent waiting for your answer stays, since its buttons answer it.
     private func isInFront(_ activity: IslandActivity) -> Bool {
         guard let front = frontApp, let frontID = front.bundleIdentifier else { return false }
@@ -799,7 +799,7 @@ final class NotchViewModel {
         switch activity {
         case .xcode: return frontID == XcodeScripting.bundleIdentifier
         case .terminal: return isFront(terminal.command?.appBundleIdentifier, tty: terminal.command?.tty)
-        case .claudeCode: return !claude.needsAnswer && isFront(claude.session?.appBundleIdentifier, tty: claude.session?.tty)
+        case .codingAgent: return !agents.needsAnswer && isFront(agents.session?.appBundleIdentifier, tty: agents.session?.tty)
         case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
         case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
         case .reminders: return frontID == RemindersMonitor.appBundleIdentifier
@@ -807,12 +807,12 @@ final class NotchViewModel {
         }
     }
 
-    /// Whether a command or Claude Code runs in the app in front with a
+    /// Whether a command or coding agent runs in the app in front with a
     /// known tab, so it's worth asking which tab is in front.
     var wantsFrontTab: Bool {
         guard let frontID = frontApp?.bundleIdentifier else { return false }
         return (terminal.command?.appBundleIdentifier == frontID && terminal.command?.tty != nil)
-            || (claude.session?.appBundleIdentifier == frontID && claude.session?.tty != nil)
+            || (agents.session?.appBundleIdentifier == frontID && agents.session?.tty != nil)
     }
 
     /// Something new to show brings a tucked-away activity back.
@@ -976,13 +976,13 @@ final class NotchViewModel {
 
     /// A permission request, question or plan opens the island and keeps
     /// it open until it's answered, here or in the terminal.
-    private func claudeEvent(_ event: ClaudeCodeMonitor.Event) {
+    private func agentEvent(_ event: AgentMonitor.Event) {
         switch event {
-        case .started: activityStarted(.claudeCode)
-        case .needsAnswer: activityNeedsAnswer(.claudeCode)
-        case .answered: activityAnswered(.claudeCode)
+        case .started: activityStarted(.codingAgent)
+        case .needsAnswer: activityNeedsAnswer(.codingAgent)
+        case .answered: activityAnswered(.codingAgent)
         case .finished: break
-        case .ended: activityEnded(.claudeCode)
+        case .ended: activityEnded(.codingAgent)
         }
     }
 
@@ -1224,7 +1224,7 @@ final class NotchViewModel {
 
     /// Something waiting for an answer stays open when the cursor leaves.
     private var isWaitingForAnswer: Bool {
-        presentation == .expanded && expandedActivity == .claudeCode && claude.needsAnswer
+        presentation == .expanded && expandedActivity == .codingAgent && agents.needsAnswer
     }
 
     /// A failure left open gives way to whatever its activity starts next,

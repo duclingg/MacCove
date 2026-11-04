@@ -1,5 +1,5 @@
 //
-//  ClaudeCodeViews.swift
+//  AgentViews.swift
 //  MacCove
 //
 //  Created by Justin Hoang on 11/2/26.
@@ -15,7 +15,8 @@ extension Color {
 
 extension AITool {
     /// The ring, the chosen option and the button that answers. Codex's
-    /// brand is black and white, so it's white on the notch.
+    /// and Cursor's brands are black and white, so theirs is white on the
+    /// notch.
     var accent: Color {
         switch self {
         case .claude: .claudeCode
@@ -30,8 +31,9 @@ struct AgentIcon: View {
     let size: CGFloat
 
     /// Filled to its edges, as the notch's art, unlike `ToolIcon`, which
-    /// pads it to sit beside other apps' icons. Codex's bare logo goes on
-    /// a white tile, its light version, which stands out on the notch.
+    /// pads it to sit beside other apps' icons. Codex's and Cursor's bare
+    /// logos go on a tile in their light versions, which stand out on the
+    /// notch.
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
         Group {
@@ -44,15 +46,18 @@ struct AgentIcon: View {
                     .frame(width: size, height: size)
                     .clipShape(shape)
             case .codex, .cursor:
-                Image(agent == .codex ? "Codex" : "Cursor")
+                // As `ToolIcon` has them: OpenAI's black on white, and
+                // Cursor's brand kit's light version.
+                let isCodex = agent == .codex
+                Image(isCodex ? "Codex" : "Cursor")
                     .renderingMode(.template)
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
-                    .foregroundStyle(.black)
+                    .foregroundStyle(isCodex ? Color.black : Color(red: 0x14 / 255, green: 0x12 / 255, blue: 0x0B / 255))
                     .frame(width: size * 0.64, height: size * 0.64)
                     .frame(width: size, height: size)
-                    .background(.white, in: shape)
+                    .background(isCodex ? Color.white : Color(red: 0xF0 / 255, green: 0xEF / 255, blue: 0xEA / 255), in: shape)
             }
         }
         .accessibilityHidden(true)
@@ -100,13 +105,13 @@ private func agentClock(_ interval: TimeInterval) -> String {
 
 /// The icon in the left wing. In the right: the ring while it works, an
 /// orange dot while it waits for you, a green check when it's done.
-struct ClaudeCodeCompactView: View {
-    let claude: ClaudeCodeMonitor
+struct AgentCompactView: View {
+    let agents: AgentMonitor
     let notchSize: CGSize
 
     var body: some View {
         let layout = CompactLayout(notch: notchSize)
-        let session = claude.session
+        let session = agents.session
 
         HStack(spacing: 0) {
             AgentIcon(agent: session?.agent ?? .claude, size: layout.artSize)
@@ -134,7 +139,7 @@ struct ClaudeCodeCompactView: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    private static func accessibilityDescription(_ session: ClaudeCodeMonitor.Session) -> String {
+    private static func accessibilityDescription(_ session: AgentMonitor.Session) -> String {
         let name = session.agent.name
         return switch session.phase {
         case .working: "\(name) is working on \(session.task)"
@@ -149,12 +154,12 @@ struct ClaudeCodeCompactView: View {
 /// A coding agent in a bubble beside another activity: the icon, inside
 /// the ring while it works and inside an orange one while it waits for
 /// you.
-struct ClaudeCodeMinimalView: View {
-    let claude: ClaudeCodeMonitor
+struct AgentMinimalView: View {
+    let agents: AgentMonitor
     let notchSize: CGSize
 
     var body: some View {
-        let session = claude.session
+        let session = agents.session
         let agent = session?.agent ?? .claude
         let layout = BubbleLayout(notch: notchSize)
         Group {
@@ -202,12 +207,12 @@ struct ClaudeCodeMinimalView: View {
 /// Plan: the plan's heading and opening lines, with Keep Planning, View
 /// Plan and Approve.
 /// Finished: how long it took, with Dismiss and Open Session.
-struct ClaudeCodeExpandedView: View {
-    let claude: ClaudeCodeMonitor
+struct AgentExpandedView: View {
+    let agents: AgentMonitor
     let notchHeight: CGFloat
 
     private var accent: Color {
-        (claude.session?.agent ?? .claude).accent
+        (agents.session?.agent ?? .claude).accent
     }
 
     private static let headerHeight: CGFloat = 56
@@ -233,7 +238,7 @@ struct ClaudeCodeExpandedView: View {
     private static let chipHeight: CGFloat = 36
     private static let bottomGap: CGFloat = 14
 
-    static func bodyHeight(for session: ClaudeCodeMonitor.Session?) -> CGFloat {
+    static func bodyHeight(for session: AgentMonitor.Session?) -> CGFloat {
         var height = NotchViewModel.expandedTopGap + headerHeight + bottomGap
         switch session?.phase {
         case .working?, nil:
@@ -264,7 +269,7 @@ struct ClaudeCodeExpandedView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let session = claude.session {
+            if let session = agents.session {
                 header(session)
                 switch session.phase {
                 case .working:
@@ -277,11 +282,11 @@ struct ClaudeCodeExpandedView: View {
                             .padding(.top, Self.codeGap)
                     }
                     HStack(spacing: 8) {
-                        chip("Deny") { claude.deny() }
+                        chip("Deny") { agents.deny() }
                         if approval.alwaysAllow != nil {
-                            chip("Always Allow") { claude.alwaysAllow() }
+                            chip("Always Allow") { agents.alwaysAllow() }
                         }
-                        chip("Allow", background: accent, foreground: .onAccent) { claude.allow() }
+                        chip("Allow", background: accent, foreground: .onAccent) { agents.allow() }
                     }
                     .padding(.top, Self.chipsGap)
                 case let .question(question):
@@ -292,17 +297,17 @@ struct ClaudeCodeExpandedView: View {
                             .padding(.top, Self.codeGap)
                     }
                     HStack(spacing: 8) {
-                        chip("Keep Planning") { claude.keepPlanning() }
+                        chip("Keep Planning") { agents.keepPlanning() }
                         if plan.filePath != nil {
-                            chip("View Plan") { claude.viewPlan() }
+                            chip("View Plan") { agents.viewPlan() }
                         }
-                        chip("Approve", background: accent, foreground: .onAccent) { claude.approvePlan() }
+                        chip("Approve", background: accent, foreground: .onAccent) { agents.approvePlan() }
                     }
                     .padding(.top, Self.chipsGap)
                 case .finished:
                     HStack(spacing: 8) {
-                        chip("Dismiss") { claude.dismiss() }
-                        chip("Open Session", background: accent, foreground: .onAccent) { claude.openSession() }
+                        chip("Dismiss") { agents.dismiss() }
+                        chip("Open Session", background: accent, foreground: .onAccent) { agents.openSession() }
                     }
                     .padding(.top, Self.chipsGap)
                 }
@@ -313,10 +318,10 @@ struct ClaudeCodeExpandedView: View {
         .frame(width: NotchViewModel.expandedWidth, alignment: .top)
     }
 
-    private func header(_ session: ClaudeCodeMonitor.Session) -> some View {
+    private func header(_ session: AgentMonitor.Session) -> some View {
         HStack(spacing: 12) {
             Button {
-                claude.openSession()
+                agents.openSession()
             } label: {
                 AgentIcon(agent: session.agent, size: 44)
                     .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -335,9 +340,9 @@ struct ClaudeCodeExpandedView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
 
-            if session.phase == .working {
+            if session.phase == .working, session.agent.canStop {
                 Button {
-                    claude.stop()
+                    agents.stop()
                 } label: {
                     Image(systemName: "stop.fill")
                         .font(.system(size: 15, weight: .semibold))
@@ -353,7 +358,7 @@ struct ClaudeCodeExpandedView: View {
         .frame(height: Self.headerHeight)
     }
 
-    private func progress(_ session: ClaudeCodeMonitor.Session, at date: Date) -> some View {
+    private func progress(_ session: AgentMonitor.Session, at date: Date) -> some View {
         VStack(spacing: 0) {
             Capsule()
                 .fill(.white.opacity(0.18))
@@ -416,7 +421,7 @@ struct ClaudeCodeExpandedView: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.08)))
     }
 
-    private func questionBody(_ question: ClaudeCodeMonitor.Question) -> some View {
+    private func questionBody(_ question: AgentMonitor.Question) -> some View {
         let item = question.current
         let lines = Self.lineCount(item.question, font: Self.textFont, width: Self.contentWidth, limit: Self.questionLineLimit)
         return VStack(spacing: 0) {
@@ -438,13 +443,13 @@ struct ClaudeCodeExpandedView: View {
             HStack(spacing: 8) {
                 // Claude Code asks it there instead, where an answer of your
                 // own can be typed.
-                chip("Open in \(claude.session?.agent.name ?? "Claude Code")") { claude.openSession() }
+                chip("Open in \(agents.session?.agent.name ?? "Claude Code")") { agents.openSession() }
                 if item.multiSelect {
                     chip(
                         "Submit",
                         background: question.selected.isEmpty ? .white.opacity(0.12) : accent,
                         foreground: question.selected.isEmpty ? .islandSecondary : .onAccent
-                    ) { claude.submitChoices() }
+                    ) { agents.submitChoices() }
                     .disabled(question.selected.isEmpty)
                 }
             }
@@ -456,9 +461,9 @@ struct ClaudeCodeExpandedView: View {
     }
 
     /// The label, and what choosing it means. A multiple choice ticks it.
-    private func optionRow(_ option: ClaudeCodeMonitor.Question.Option, isMultiSelect: Bool, isSelected: Bool) -> some View {
+    private func optionRow(_ option: AgentMonitor.Question.Option, isMultiSelect: Bool, isSelected: Bool) -> some View {
         Button {
-            claude.choose(option.label)
+            agents.choose(option.label)
         } label: {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
@@ -540,7 +545,7 @@ struct ClaudeCodeExpandedView: View {
         return min(max(Int((bounds.height / lineHeight).rounded()), 1), limit)
     }
 
-    private static func title(_ session: ClaudeCodeMonitor.Session) -> String {
+    private static func title(_ session: AgentMonitor.Session) -> String {
         switch session.phase {
         case let .approval(approval): approval.title
         case let .question(question): question.current.header.isEmpty ? "Claude has a question" : question.current.header
@@ -552,7 +557,7 @@ struct ClaudeCodeExpandedView: View {
     /// "MacCove · Editing IslandView.swift", "Claude Code · MacCove",
     /// "Claude Code · MacCove · 1 of 3", "Plan · MacCove", or "Done in 6:48
     /// · 5 files changed".
-    private static func subtitle(_ session: ClaudeCodeMonitor.Session) -> String {
+    private static func subtitle(_ session: AgentMonitor.Session) -> String {
         switch session.phase {
         case .working:
             return [session.project, session.activity ?? "Thinking"].filter { !$0.isEmpty }.joined(separator: " · ")

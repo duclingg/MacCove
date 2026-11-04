@@ -1,5 +1,5 @@
 //
-//  ClaudeCodeMonitor.swift
+//  AgentMonitor.swift
 //  MacCove
 //
 //  Created by Justin Hoang on 11/2/26.
@@ -7,18 +7,19 @@
 
 import AppKit
 
-/// Coding agent sessions, from Claude Code and Codex, as the notch shows
-/// them: working, waiting for you, then finished.
+/// Coding agent sessions, from Claude Code, Codex and Cursor, as the
+/// notch shows them: working, waiting for you, then finished.
 ///
 /// Each agent runs the hook MacCove adds to its settings (see
-/// `ClaudeCodeSetup` and `CodexSetup`) for each event, which reaches
-/// `handle(_:)` through `AgentBridge` at "/claude/…" or "/codex/…". Most
-/// events only report. A permission request, and Claude's question
-/// (AskUserQuestion) and finished plan (ExitPlanMode), wait for the
-/// notch's answer, which goes back to the agent as the hook's. Both take
-/// a permission decision in the same shape.
+/// `ClaudeCodeSetup`, `CodexSetup` and `CursorSetup`) for each event,
+/// which reaches `handle(_:)` through `AgentBridge` at "/claude/…",
+/// "/codex/…" or "/cursor/…". Most events only report. A permission
+/// request, and Claude's question (AskUserQuestion) and finished plan
+/// (ExitPlanMode), wait for the notch's answer, which goes back to the
+/// agent as the hook's. Claude Code and Codex take a permission decision
+/// in the same shape; Cursor's hooks only report.
 @Observable
-final class ClaudeCodeMonitor {
+final class AgentMonitor {
     enum Event {
         case started
         /// A permission request, question or plan is waiting on the island.
@@ -196,10 +197,11 @@ final class ClaudeCodeMonitor {
         let event = (request.path as NSString).lastPathComponent
         guard let agent = Self.agent(of: request),
               let input = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any],
-              let sessionID = input["session_id"] as? String else { return .empty }
+              let sessionID = Self.sessionID(in: input, from: agent) else { return .empty }
         // Two agents could, in principle, pick the same ID.
         let id = "\(agent.rawValue)/\(sessionID)"
-        let folder = input["cwd"] as? String ?? ""
+        // Cursor gives its workspace instead, on a prompt.
+        let folder = input["cwd"] as? String ?? (input["workspace_roots"] as? [String])?.first ?? ""
 
         switch event {
         case "UserPromptSubmit":
@@ -237,10 +239,51 @@ final class ClaudeCodeMonitor {
             end(id)
         case "SessionEnd":
             end(id)
+
+        // Cursor's, which come in camelCase and only report.
+        case "beforeSubmitPrompt":
+            let prompt = (input["prompt"] as? String) ?? ""
+            begin(id, folder: folder, task: Self.firstLine(prompt), request: request)
+        case "postToolUse":
+            // There's no hook before a tool that doesn't hold it up, so
+            // this says what it just did.
+            update(id) { session in
+                session.toolUses += 1
+                let tool = input["tool_name"] as? String
+                let toolInput = input["tool_input"] as? [String: Any]
+                if let activity = Self.describe(tool: tool, input: toolInput) {
+                    session.activity = activity
+                }
+                Self.record(tool: tool, input: toolInput, in: &session)
+            }
+        case "afterFileEdit":
+            guard let path = input["file_path"] as? String else { break }
+            update(id) { session in
+                session.editedFiles.insert(path)
+                session.activity = "Editing \((path as NSString).lastPathComponent)"
+            }
+        case "stop":
+            // Stopped from Cursor, which ends the turn as Esc does.
+            if input["status"] as? String == "aborted" {
+                end(id)
+            } else {
+                finish(id)
+            }
+        case "sessionEnd":
+            end(id)
         default:
             break
         }
         return .empty
+    }
+
+    /// Cursor's chat is its conversation, which keeps its ID from one
+    /// prompt to the next; the others say which session.
+    private static func sessionID(in input: [String: Any], from agent: AITool) -> String? {
+        if agent == .cursor, let conversation = input["conversation_id"] as? String, !conversation.isEmpty {
+            return conversation
+        }
+        return input["session_id"] as? String
     }
 
     // MARK: - From the island
@@ -330,7 +373,7 @@ final class ClaudeCodeMonitor {
     /// Interrupts the turn with Esc in its terminal. Neither agent reports
     /// a Stop for that, so the session leaves the notch here.
     func stop() {
-        guard let shown = session, shown.phase == .working else { return }
+        guard let shown = session, shown.phase == .working, shown.agent.canStop else { return }
         if TerminalWindow.pressEscape(appBundleIdentifier: shown.appBundleIdentifier, tty: shown.tty) {
             end(shown.id)
         }
@@ -380,6 +423,14 @@ final class ClaudeCodeMonitor {
         }
         if let pid = headers["x-maccove-pid"].flatMap({ pid_t($0) }) {
             session.pid = pid
+        }
+        // Cursor's own agent runs in its app, not a terminal. The process
+        // that runs its hooks needn't last, so the app is watched instead.
+        if session.agent == .cursor, session.tty == nil {
+            session.pid = nil
+            if session.appBundleIdentifier?.isEmpty ?? true {
+                session.appBundleIdentifier = CursorSetup.bundleIdentifier
+            }
         }
     }
 
@@ -545,7 +596,8 @@ final class ClaudeCodeMonitor {
         return .json(["hookSpecificOutput": output])
     }
 
-    /// A session whose agent has quit, with its terminal, leaves.
+    /// A session whose agent has quit, with its terminal, leaves; so does
+    /// one in Cursor's app once it has quit.
     private func watchProcesses() {
         guard processCheck == nil else { return }
         processCheck = Task { [weak self] in
@@ -553,8 +605,13 @@ final class ClaudeCodeMonitor {
                 try? await Task.sleep(for: Self.processCheckInterval)
                 guard let self, !self.sessions.isEmpty else { break }
                 for (id, session) in self.sessions {
-                    guard let pid = session.pid, kill(pid, 0) != 0, errno == ESRCH else { continue }
-                    self.end(id)
+                    if let pid = session.pid {
+                        guard kill(pid, 0) != 0, errno == ESRCH else { continue }
+                        self.end(id)
+                    } else if session.agent == .cursor, let app = session.appBundleIdentifier,
+                              NSRunningApplication.runningApplications(withBundleIdentifier: app).isEmpty {
+                        self.end(id)
+                    }
                 }
             }
             self?.processCheck = nil
@@ -569,8 +626,13 @@ final class ClaudeCodeMonitor {
         return trimmed.count > 120 ? String(trimmed.prefix(119)) + "…" : trimmed
     }
 
+    /// Cursor's tools name the file in one of the last two.
     private static func fileName(_ input: [String: Any]?) -> String? {
-        (input?["file_path"] as? String ?? input?["notebook_path"] as? String).map { ($0 as NSString).lastPathComponent }
+        let path = input?["file_path"] as? String
+            ?? input?["notebook_path"] as? String
+            ?? input?["target_file"] as? String
+            ?? input?["path"] as? String
+        return path.map { ($0 as NSString).lastPathComponent }
     }
 
     /// A shell command's text. Codex's older shell tools give it as the
@@ -616,7 +678,7 @@ final class ClaudeCodeMonitor {
             }
         case "Read":
             return fileName(input).map { "Reading \($0)" } ?? "Reading"
-        case "Bash", "exec_command", "shell", "local_shell", "container.exec":
+        case "Bash", "Shell", "exec_command", "shell", "local_shell", "container.exec":
             if let description = input?["description"] as? String, !description.isEmpty { return description }
             return shellCommand(input).map { "Running " + firstLine($0) } ?? "Running a command"
         case "Grep", "Glob":
@@ -625,9 +687,13 @@ final class ClaudeCodeMonitor {
             return "Searching the web"
         case "Task", "Agent", "spawn_agent":
             return "Working with a subagent"
-        case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "update_plan":
+        case "Delete":
+            return fileName(input).map { "Deleting \($0)" } ?? "Deleting a file"
+        case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "update_plan", "todo_write":
             return nil
         default:
+            // Cursor names an MCP tool "MCP:read_file".
+            if tool.hasPrefix("MCP:") { return "Using \(tool.dropFirst(4))" }
             return tool.hasPrefix("mcp__") ? "Using \(tool.split(separator: "__").dropFirst().first ?? "a tool")" : "Using \(tool)"
         }
     }
@@ -652,7 +718,7 @@ final class ClaudeCodeMonitor {
                let doing = current["step"] as? String {
                 session.activity = doing
             }
-        case "TodoWrite":
+        case "TodoWrite", "todo_write":
             let todos = input?["todos"] as? [[String: Any]] ?? []
             session.taskCount = todos.count
             session.tasksDone = todos.filter { $0["status"] as? String == "completed" }.count
@@ -746,10 +812,10 @@ final class ClaudeCodeMonitor {
 }
 
 #if DEBUG
-extension ClaudeCodeMonitor {
+extension AgentMonitor {
     /// A session that stays as given, for SwiftUI previews.
-    static func preview(_ session: Session) -> ClaudeCodeMonitor {
-        let monitor = ClaudeCodeMonitor()
+    static func preview(_ session: Session) -> AgentMonitor {
+        let monitor = AgentMonitor()
         monitor.sessions[session.id] = session
         return monitor
     }

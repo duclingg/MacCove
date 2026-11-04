@@ -16,7 +16,7 @@ protocol AgentSetupProtocol {
 
 extension Notification.Name {
     /// Posted once Remove has taken MacCove's hooks out of an agent's
-    /// settings, with the `AITool` as its object. `ClaudeCodeMonitor` then
+    /// settings, with the `AITool` as its object. `AgentMonitor` then
     /// lets go of that agent's sessions.
     static let agentHooksRemoved = Notification.Name("MacCoveAgentHooksRemoved")
 }
