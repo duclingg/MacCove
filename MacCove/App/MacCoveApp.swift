@@ -14,8 +14,12 @@ struct MacCoveApp: App {
     /// the clipboard.
     @State private var isClipboardRestricted = ClipboardMonitor.isAccessRestricted
 
+    /// Xcode runs the app to draw SwiftUI previews, which shouldn't add a
+    /// menu bar item each time.
+    private static let isRunningForPreviews = ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+
     var body: some Scene {
-        MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled") {
+        MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled", isInserted: .constant(!Self.isRunningForPreviews)) {
             Toggle("Launch at Login", isOn: Binding(
                 get: { launchAtLogin.isEnabled },
                 set: { launchAtLogin.setEnabled($0) }
