@@ -98,11 +98,17 @@ final class AirPodsMonitor {
     @ObservationIgnored private var leaving: Task<Void, Never>?
     @ObservationIgnored private var rereading: Task<Void, Never>?
     @ObservationIgnored private var ticking: Task<Void, Never>?
+    /// Those connected as it starts, which macOS may also tell of then.
+    @ObservationIgnored private var alreadyConnected: Set<String> = []
+    @ObservationIgnored private var startedAt = Date.distantPast
 
     /// Levels show up a moment after the connection, sometimes a few.
     private static let rereadDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(3)]
     /// The list's levels are read again this often.
     private static let tickInterval: Duration = .seconds(60)
+    /// How long after starting a connection to a pair that was already
+    /// connected is taken to be macOS telling of it, rather than new.
+    private static let startupQuiet: TimeInterval = 3
     /// Bluetooth's Audio/Video major device class.
     private static let audioDeviceClass: BluetoothDeviceClassMajor = 0x04
 
@@ -184,6 +190,8 @@ final class AirPodsMonitor {
             guard let device = device as? IOBluetoothDevice, device.isConnected() else { continue }
             add(device, announce: false)
         }
+        alreadyConnected = Set(connected.map(\.id))
+        startedAt = .now
         connectNotification = IOBluetoothDevice.register(
             forConnectNotifications: bridge,
             selector: #selector(BluetoothBridge.deviceConnected(_:device:))
@@ -203,10 +211,16 @@ final class AirPodsMonitor {
     /// queue it called back on.
     fileprivate func deviceConnected(address: String) {
         guard let device = IOBluetoothDevice(addressString: address) else { return }
-        add(device, announce: true)
+        // macOS also tells of those connected as this starts.
+        let isStarting = Date.now.timeIntervalSince(startedAt) < Self.startupQuiet
+        add(device, announce: !(isStarting && alreadyConnected.contains(address)))
     }
 
     fileprivate func deviceDisconnected(address: String) {
+        remove(address)
+    }
+
+    private func remove(_ address: String) {
         disconnectNotifications.removeValue(forKey: address)?.unregister()
         connected.removeAll { $0.id == address }
         devicesChanged()
@@ -218,16 +232,21 @@ final class AirPodsMonitor {
 
     private func add(_ device: IOBluetoothDevice, announce: Bool) {
         guard let address = device.addressString, Self.isHeadphones(device) else { return }
-        // Already here: macOS also tells of those connected as this
-        // starts.
-        guard !connected.contains(where: { $0.id == address }) else { return }
         let name = device.name ?? "Headphones"
-        connected.append(ConnectedHeadphones(
+        let headphones = ConnectedHeadphones(
             id: address,
             name: name,
             device: AudioRoute.bluetoothDevice(named: name),
             battery: Self.battery(of: device)
-        ))
+        )
+        // Still listed when its disconnection was never heard of: every
+        // connection counts, so it shows again.
+        if let index = connected.firstIndex(where: { $0.id == address }) {
+            connected[index] = headphones
+        } else {
+            connected.append(headphones)
+        }
+        disconnectNotifications.removeValue(forKey: address)?.unregister()
         disconnectNotifications[address] = device.register(
             forDisconnectNotification: bridge,
             selector: #selector(BluetoothBridge.deviceDisconnected(_:device:))
@@ -252,12 +271,16 @@ final class AirPodsMonitor {
 
     // MARK: - Levels
 
+    /// Those that have gone since, whether or not macOS said so, leave.
     private func readLevels() {
         var changed = false
-        for index in connected.indices {
-            guard let device = IOBluetoothDevice(addressString: connected[index].id) else { continue }
+        for headphones in connected {
+            guard let device = IOBluetoothDevice(addressString: headphones.id), device.isConnected() else {
+                remove(headphones.id)
+                continue
+            }
             let battery = Self.battery(of: device)
-            if battery != connected[index].battery {
+            if battery != headphones.battery, let index = connected.firstIndex(where: { $0.id == headphones.id }) {
                 connected[index].battery = battery
                 changed = true
             }
