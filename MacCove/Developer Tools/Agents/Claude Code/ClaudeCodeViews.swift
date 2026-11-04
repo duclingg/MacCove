@@ -17,6 +17,8 @@ extension Color {
 struct ClaudeCodeIcon: View {
     let size: CGFloat
 
+    /// Filled to its edges, as the notch's art, unlike `ToolIcon`, which
+    /// pads it to sit beside other apps' icons.
     var body: some View {
         Image("ClaudeCode")
             .resizable()

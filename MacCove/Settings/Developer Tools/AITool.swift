@@ -18,11 +18,11 @@ enum AITool: String, CaseIterable {
         }
     }
     
-    @ViewBuilder var icon: some View {
+    var icon: ToolIcon {
         switch self {
-        case .claude: ClaudeCodeIcon(size: 25)
-        case .codex: Image(systemName: "exclamationmark.triangle")
-        case .cursor: Image(systemName: "exclamationmark.triangle")
+        case .claude: ToolIcon(.claudeCode)
+        case .codex: ToolIcon(.codex)
+        case .cursor: ToolIcon(.cursor)
         }
     }
     
