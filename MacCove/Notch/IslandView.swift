@@ -135,6 +135,12 @@ struct IslandView: View {
                 case .reminders?:
                     RemindersCompactView(reminders: viewModel.reminders, notchSize: notch)
                         .transition(.islandContent)
+                case .deviceBatteries?:
+                    DeviceBatteryCompactView(batteries: viewModel.deviceBatteries, notchSize: notch)
+                        .transition(.islandContent)
+                case .airPods?:
+                    AirPodsCompactView(airPods: viewModel.airPods, notchSize: notch)
+                        .transition(.islandContent)
                 case .shelf?:
                     ShelfCompactView(shelf: viewModel.shelf, notchSize: notch)
                         .transition(.islandContent)
@@ -151,7 +157,8 @@ struct IslandView: View {
             case .expanded:
                 // Sign-in never opens, so anything but the player, a build, a
                 // command, an agent, GitHub, the clipboard, the calendar,
-                // reminders or the shelf here is the battery's.
+                // reminders, device batteries, AirPods or the shelf here is
+                // the battery's.
                 switch viewModel.primaryActivity {
                 case .nowPlaying?:
                     NowPlayingExpandedView(
@@ -181,6 +188,12 @@ struct IslandView: View {
                         .transition(.islandContent)
                 case .reminders?:
                     RemindersExpandedView(reminders: viewModel.reminders, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case .deviceBatteries?:
+                    DeviceBatteryExpandedView(batteries: viewModel.deviceBatteries, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case .airPods?:
+                    AirPodsExpandedView(airPods: viewModel.airPods, notchHeight: notch.height)
                         .transition(.islandContent)
                 case .shelf?:
                     ShelfExpandedView(shelf: viewModel.shelf, notchHeight: notch.height)
@@ -298,6 +311,10 @@ private struct IslandBubbleView: View {
             CalendarMinimalView(calendar: viewModel.calendar, notchSize: viewModel.notchSize)
         case .reminders:
             RemindersMinimalView(reminders: viewModel.reminders, notchSize: viewModel.notchSize)
+        case .deviceBatteries:
+            DeviceBatteryMinimalView(batteries: viewModel.deviceBatteries, notchSize: viewModel.notchSize)
+        case .airPods:
+            AirPodsMinimalView(airPods: viewModel.airPods, notchSize: viewModel.notchSize)
         case .shelf:
             ShelfMinimalView(shelf: viewModel.shelf, notchSize: viewModel.notchSize)
         case .signIn, .charging, .lowBattery:

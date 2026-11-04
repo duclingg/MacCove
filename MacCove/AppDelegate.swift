@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var github = GitHubMonitor()
     private(set) lazy var calendar = CalendarMonitor()
     private(set) lazy var reminders = RemindersMonitor()
+    private(set) lazy var deviceBatteries = DeviceBatteryMonitor()
+    private(set) lazy var airPods = AirPodsMonitor()
     private(set) lazy var shelf = FileShelf()
     private(set) lazy var updates = UpdateChecker()
     /// What Settings can open in the notch.
@@ -64,12 +66,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             clipboard: clipboard,
             calendar: calendar,
             reminders: reminders,
+            deviceBatteries: deviceBatteries,
+            airPods: airPods,
             shelf: shelf
         )
         self.viewModel = viewModel
         notchCommands.showClipboardHistory = { [weak viewModel] in viewModel?.showClipboardHistory() }
         notchCommands.showTodayEvents = { [weak viewModel] in viewModel?.showTodayEvents() }
         notchCommands.showShelf = { [weak viewModel] in viewModel?.showShelf() }
+        notchCommands.showDeviceBatteries = { [weak viewModel] in viewModel?.showDeviceBatteries() }
         notchController = NotchWindowController(viewModel: viewModel)
         nowPlaying.start()
         battery.start()
@@ -82,6 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         calendar.start()
         reminders.start()
+        // Headphones are listed with the other devices' batteries.
+        airPods.onDevicesChange = { [weak deviceBatteries] headphones in
+            deviceBatteries?.setHeadphones(headphones)
+        }
+        deviceBatteries.start()
+        airPods.start()
         updates.startAutomaticChecks()
         
         // Hook events from Claude Code, by the agent they're for.

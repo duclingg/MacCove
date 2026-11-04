@@ -37,6 +37,7 @@ struct MacCoveApp: App {
                 isClipboardRestricted = ClipboardMonitor.isAccessRestricted
                 appDelegate.calendar.refreshPermissions()
                 appDelegate.reminders.refreshPermissions()
+                appDelegate.airPods.refreshPermissions()
             }
             Divider()
             Button("Quit MacCove") {
@@ -55,6 +56,8 @@ struct MacCoveApp: App {
                 .environment(appDelegate.clipboard)
                 .environment(appDelegate.calendar)
                 .environment(appDelegate.reminders)
+                .environment(appDelegate.deviceBatteries)
+                .environment(appDelegate.airPods)
                 .environment(appDelegate.shelf)
                 .environment(appDelegate.updates)
                 .environment(appDelegate.notchCommands)

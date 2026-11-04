@@ -343,6 +343,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MacCove shows and changes whether the song playing in Music is a Favorite, shows and stops your Xcode builds, and brings forward the terminal window a command ran in.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "MacCove shows your AirPods in the notch as they connect, with how much battery they have.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "MacCove shows your next event in the notch: when it starts, when to leave for it, and the rest of your day.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "MacCove finds the person whose birthday it is, so Message can write to them.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -386,6 +387,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "MacCove shows and changes whether the song playing in Music is a Favorite, shows and stops your Xcode builds, and brings forward the terminal window a command ran in.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "MacCove shows your AirPods in the notch as they connect, with how much battery they have.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "MacCove shows your next event in the notch: when it starts, when to leave for it, and the rest of your day.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "MacCove finds the person whose birthday it is, so Message can write to them.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
