@@ -157,18 +157,56 @@ private struct IslandBubbleView: View {
 
             HStack(spacing: 0) {
                 ForEach(bubble.segments, id: \.activity) { segment in
-                    content(for: segment.activity)
-                        .frame(width: size.width / CGFloat(bubble.segments.count), height: size.height)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            viewModel.expand(segment.activity)
+                    Group {
+                        if !segment.overflow.isEmpty {
+                            miniIcons(for: segment.overflow)
+                                .transition(.islandContent)
+                        } else {
+                            content(for: segment.activity)
+                                .transition(.islandContent)
                         }
-                        .transition(.islandContent)
+                    }
+                    .frame(width: size.width / CGFloat(bubble.segments.count), height: size.height)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        viewModel.expand(segment.activity)
+                    }
+                    .transition(.islandContent)
                 }
             }
             .frame(width: size.width, height: size.height)
         }
     }
+
+    /// The ones that don't fit, each glyph shrunk and stacked over the next,
+    /// the first on top. A black edge round each keeps them apart.
+    private func miniIcons(for activities: [IslandActivity]) -> some View {
+        let layout = BubbleLayout(notch: viewModel.notchSize)
+        let size = (layout.artSize * Self.miniScale).rounded()
+
+        return HStack(spacing: -size * Self.miniOverlap) {
+            ForEach(Array(activities.enumerated()), id: \.element) { index, activity in
+                content(for: activity)
+                    .scaleEffect(size / layout.artSize)
+                    .frame(width: size, height: size)
+                    .background {
+                        RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+                            .fill(.black)
+                            .padding(-Self.miniEdge)
+                    }
+                    .zIndex(Double(activities.count - index))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(activities.count) more")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Of a bubble's glyph: 16pt beside a 37pt notch.
+    private static let miniScale: CGFloat = 0.7
+    /// How much of each mini icon the next one hides.
+    private static let miniOverlap: CGFloat = 0.38
+    private static let miniEdge: CGFloat = 1.5
 
     @ViewBuilder
     private func content(for activity: IslandActivity) -> some View {

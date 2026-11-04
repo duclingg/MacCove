@@ -53,6 +53,9 @@ struct IslandBubble: Equatable, Identifiable {
         let activity: IslandActivity
         /// In the same space as the bubble's frame.
         let frame: CGRect
+        /// The extras, stacked as mini icons in place of the first of them,
+        /// which a click opens. Empty for an activity's own.
+        var overflow: [IslandActivity] = []
     }
 
     let side: Side
@@ -113,6 +116,10 @@ final class NotchViewModel {
     private var isSigningIn = false
     /// The charging pill or the low battery alert, until it times out.
     private var batteryAlert: IslandActivity?
+    /// Opened from the mini icons: stays in the first bubble once it
+    /// closes, so the next click on them reaches the one after it. Something
+    /// new starting puts everything back in order.
+    private var promotedActivity: IslandActivity?
 
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
@@ -173,11 +180,23 @@ final class NotchViewModel {
         }
     }
 
-    /// Most that run at once: one in the island and two in bubbles.
+    /// Most shown on their own: one in the island and two in bubbles. The
+    /// rest stack up as mini icons in the right bubble.
     static let maxActivities = 3
 
-    /// What's running, the island's first and the rest for the bubbles.
+    /// What's shown on its own, the island's first and the rest for the
+    /// bubbles.
     var activities: [IslandActivity] {
+        Array(runningActivities.prefix(Self.maxActivities))
+    }
+
+    /// Running past those, stacked as mini icons in the right bubble.
+    var overflowActivities: [IslandActivity] {
+        Array(runningActivities.dropFirst(Self.maxActivities))
+    }
+
+    /// Everything running, in order.
+    private var runningActivities: [IslandActivity] {
         // A full-screen app hides everything but the lock screen, unless the
         // island was brought back on purpose.
         let isShowingAll = !isFullScreenActive || isRevealedByHover
@@ -215,10 +234,14 @@ final class NotchViewModel {
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
         }
+        if running.count > Self.maxActivities, let promotedActivity,
+           let index = running.firstIndex(of: promotedActivity), index > 1 {
+            running.insert(running.remove(at: index), at: 1)
+        }
         if presentation == .expanded, let expandedActivity, let index = running.firstIndex(of: expandedActivity) {
             running.insert(running.remove(at: index), at: 0)
         }
-        return Array(running.prefix(Self.maxActivities))
+        return running
     }
 
     var primaryActivity: IslandActivity? {
@@ -320,16 +343,20 @@ final class NotchViewModel {
     /// there, and otherwise joins the second's bubble. When the menus fill
     /// both sides of the notch, there are no bubbles at all, so none covers
     /// a menu; the others keep running and come back once there's room.
-    /// Never beside the open island.
+    /// Never beside the open island. Any more than three stack up as mini
+    /// icons beside the second, always on the right; without room on the
+    /// left, the third joins the stack.
     var bubbles: [IslandBubble] {
         guard state == .compact, appMenus?.spillsPastCentre != true else { return [] }
         var trailing = Array(activities.dropFirst())
-        guard !trailing.isEmpty else { return [] }
+        guard let second = trailing.first else { return [] }
+        let overflow = overflowActivities
         if trailing.count > 1, hasRoomLeftOfIsland(for: bubbleWidth(for: [trailing[1]])) {
             let third = trailing.removeLast()
-            return [bubble(on: .trailing, for: trailing), bubble(on: .leading, for: [third])]
+            return [bubble(on: .trailing, for: [second], stack: overflow), bubble(on: .leading, for: [third])]
         }
-        return [bubble(on: .trailing, for: trailing)]
+        guard !overflow.isEmpty else { return [bubble(on: .trailing, for: trailing)] }
+        return [bubble(on: .trailing, for: [second], stack: Array(trailing.dropFirst()) + overflow)]
     }
 
     /// A lone Now Playing bubble has room for the audio device too.
@@ -347,8 +374,10 @@ final class NotchViewModel {
         }
     }
 
-    /// Hovering either glyph grows the whole bubble.
-    private func bubble(on side: IslandBubble.Side, for activities: [IslandActivity]) -> IslandBubble {
+    /// Hovering either glyph grows the whole bubble. A stack, even of one,
+    /// takes a glyph's place on the outside.
+    private func bubble(on side: IslandBubble.Side, for shown: [IslandActivity], stack: [IslandActivity] = []) -> IslandBubble {
+        let activities = shown + stack.prefix(1)
         let width = bubbleWidth(for: activities)
         let grow = hovered.map { activities.contains($0) } == true ? Self.bubbleHoverGrowth : 0
         let size = CGSize(width: width + grow, height: notchSize.height + grow)
@@ -362,7 +391,8 @@ final class NotchViewModel {
         let segments = ordered.enumerated().map { index, activity in
             IslandBubble.Segment(
                 activity: activity,
-                frame: CGRect(x: frame.minX + segmentWidth * CGFloat(index), y: 0, width: segmentWidth, height: frame.height)
+                frame: CGRect(x: frame.minX + segmentWidth * CGFloat(index), y: 0, width: segmentWidth, height: frame.height),
+                overflow: activity == stack.first ? stack : []
             )
         }
         return IslandBubble(side: side, frame: frame, segments: segments, isWide: isWideBubble(for: activities))
@@ -472,6 +502,10 @@ final class NotchViewModel {
     /// Opens the activity clicked: the island's own, or one from a bubble.
     func expand(_ activity: IslandActivity? = nil) {
         guard let activity = activity ?? primaryActivity, activity != .signIn else { return }
+        let isStacked = bubbles.flatMap(\.segments).contains { $0.activity == activity && !$0.overflow.isEmpty }
+        if isStacked || overflowActivities.contains(activity) {
+            promotedActivity = activity
+        }
         collapseTask?.cancel()
         alertTask?.cancel()
         expandedActivity = activity
@@ -670,6 +704,7 @@ final class NotchViewModel {
     /// A failure left open gives way to whatever its activity starts next,
     /// unless the cursor is on it.
     private func activityStarted(_ activity: IslandActivity) {
+        promotedActivity = nil
         guard expandedActivity == activity else { return }
         failureCollapseTask?.cancel()
         if presentation == .expanded, !isHovering {
