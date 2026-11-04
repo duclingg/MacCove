@@ -12,6 +12,17 @@ private func eventTint(_ event: CalendarEvent) -> Color {
     event.isBirthday ? .calendarBirthday : event.color
 }
 
+/// What's shown: a meeting in blue, an event as its calendar has it.
+private func activityTint(for activity: CalendarMonitor.Activity?) -> Color {
+    guard let activity else { return .calendarEvent }
+    return activity.event.isMeeting ? .calendarMeeting : eventTint(activity.event)
+}
+
+/// Green for Now as a meeting starts, and the bubble then.
+private func accent(for activity: CalendarMonitor.Activity?) -> Color {
+    activity?.phase == .starting ? .calendarJoin : activityTint(for: activity)
+}
+
 /// A car while it's time to leave, a gift for a birthday, otherwise the
 /// calendar.
 private func symbol(for activity: CalendarMonitor.Activity?) -> String {
@@ -114,9 +125,9 @@ private struct CalendarRing: View {
 }
 
 /// The calendar in the left wing, in the event's colour. In the right:
-/// minutes until it starts, Leave when it's time, the time gone as a ring
-/// while it's on, Today for all-day events, the start time the night
-/// before, or how much more there is today.
+/// minutes until it starts, Leave when it's time, Now as a meeting starts,
+/// the time gone as a ring while it's on, Today for all-day events, the
+/// start time the night before, or how much more there is today.
 struct CalendarCompactView: View {
     let calendar: CalendarMonitor
     let notchSize: CGSize
@@ -142,6 +153,7 @@ struct CalendarCompactView: View {
         switch activity.phase {
         case .upcoming: return "88 min"
         case .leave: return "Leave"
+        case .starting: return "Now"
         case .during: return nil
         case .allDay: return "Today"
         case .tomorrow: return clockTime(activity.event.start)
@@ -154,7 +166,7 @@ struct CalendarCompactView: View {
 
         TimelineView(.periodic(from: .now, by: 15)) { context in
             HStack(spacing: 0) {
-                CalendarGlyph(symbol: symbol(for: activity), color: activity.map { eventTint($0.event) } ?? .calendarEvent, size: layout.artSize)
+                CalendarGlyph(symbol: symbol(for: activity), color: activityTint(for: activity), size: layout.artSize)
                 Spacer(minLength: 0)
                 trailing(activity, at: context.date, size: layout.artSize)
             }
@@ -177,9 +189,12 @@ struct CalendarCompactView: View {
                 Text(shortDurationText(minutes: minutes(until: activity.event.start, from: now)))
             case .leave:
                 Text("Leave")
-                    .foregroundStyle(eventTint(activity.event))
+                    .foregroundStyle(activityTint(for: activity))
+            case .starting:
+                Text("Now")
+                    .foregroundStyle(accent(for: activity))
             case .during:
-                CalendarRing(progress: elapsedFraction(activity.event, at: now), diameter: 20, lineWidth: 3, color: eventTint(activity.event))
+                CalendarRing(progress: elapsedFraction(activity.event, at: now), diameter: 20, lineWidth: 3, color: activityTint(for: activity))
                     .frame(width: size, height: size)
             case .allDay:
                 Text("Today")
@@ -199,6 +214,7 @@ struct CalendarCompactView: View {
         switch activity.phase {
         case .upcoming: return "\(event.title) in \(durationText(minutes: minutes(until: event.start, from: now)))"
         case .leave: return "Time to leave for \(event.title)"
+        case .starting: return "\(event.title) is starting"
         case .during: return "\(event.title), \(durationText(minutes: minutes(until: event.end, from: now))) left"
         case .allDay: return "Today: \(event.title)"
         case .tomorrow: return "Tomorrow at \(clockTime(event.start)): \(event.title)"
@@ -215,7 +231,7 @@ struct CalendarMinimalView: View {
     var body: some View {
         let layout = BubbleLayout(notch: notchSize)
         let activity = calendar.activity
-        let color = activity.map { eventTint($0.event) } ?? .calendarEvent
+        let color = accent(for: activity)
 
         Group {
             if let activity, activity.phase == .during {
@@ -260,6 +276,8 @@ struct CalendarExpandedView: View {
     private static let maxRows = 5
     private static let chipsGap: CGFloat = 12
     private static let chipHeight: CGFloat = 36
+    private static let peopleGap: CGFloat = 10
+    private static let avatarSize: CGFloat = 28
     private static let bottomGap: CGFloat = 14
 
     private var isShowingToday: Bool {
@@ -276,9 +294,17 @@ struct CalendarExpandedView: View {
         } else if calendar.activity?.phase == .during {
             height += barGap + barHeight + footerGap + footerHeight
         } else {
+            if let activity = calendar.activity, showsPeople(activity) {
+                height += peopleGap + avatarSize
+            }
             height += chipsGap + chipHeight
         }
         return height
+    }
+
+    /// Who's invited, under a meeting until it's on.
+    private static func showsPeople(_ activity: CalendarMonitor.Activity) -> Bool {
+        (activity.phase == .upcoming || activity.phase == .starting) && activity.event.isMeeting && !activity.event.attendees.isEmpty
     }
 
     var body: some View {
@@ -300,7 +326,7 @@ struct CalendarExpandedView: View {
 
     @ViewBuilder
     private func event(_ activity: CalendarMonitor.Activity, at now: Date) -> some View {
-        let color = eventTint(activity.event)
+        let color = activityTint(for: activity)
         header(
             symbol: symbol(for: activity),
             color: color,
@@ -312,9 +338,77 @@ struct CalendarExpandedView: View {
         if activity.phase == .during {
             progress(activity, color: color, at: now)
         } else {
+            if Self.showsPeople(activity) {
+                people(activity.event.attendees)
+                    .padding(.top, Self.peopleGap)
+            }
             buttons(activity, color: color)
                 .padding(.top, Self.chipsGap)
         }
+    }
+
+    // MARK: - Who's invited
+
+    /// Up to three faces, then how many more, as initials over the
+    /// design's colours.
+    private static let avatarColors: [Color] = [
+        Color(red: 94 / 255, green: 92 / 255, blue: 230 / 255),
+        Color(red: 191 / 255, green: 90 / 255, blue: 242 / 255),
+        Color(red: 1, green: 159 / 255, blue: 10 / 255),
+        Color(red: 100 / 255, green: 210 / 255, blue: 1),
+        Color(red: 1, green: 55 / 255, blue: 95 / 255),
+    ]
+    private static let moreColor = Color(red: 72 / 255, green: 72 / 255, blue: 74 / 255)
+    private static let maxFaces = 3
+
+    private func people(_ names: [String]) -> some View {
+        let shown = names.prefix(Self.maxFaces)
+        let more = names.count - shown.count
+
+        return HStack(spacing: 16) {
+            HStack(spacing: -6) {
+                ForEach(Array(shown.enumerated()), id: \.offset) { index, name in
+                    avatar(Self.initials(name), color: Self.avatarColors[index % Self.avatarColors.count])
+                }
+                if more > 0 {
+                    avatar("+\(more)", color: Self.moreColor)
+                }
+            }
+            .accessibilityHidden(true)
+            Text(Self.peopleLabel(names))
+                .font(.system(size: 12))
+                .foregroundStyle(.islandSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: Self.avatarSize)
+    }
+
+    private func avatar(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: Self.avatarSize, height: Self.avatarSize)
+            .background(Circle().fill(color))
+            // The notch's black between overlapping faces.
+            .overlay(Circle().stroke(.black, lineWidth: 2).padding(-1))
+    }
+
+    /// "MK" for Maya Kim, "J" for jordan.
+    private static func initials(_ name: String) -> String {
+        let words = name.split { $0.isWhitespace || $0 == "." || $0 == "_" }
+        let letters = [words.first, words.count > 1 ? words.last : nil].compactMap { $0?.first }
+        return String(letters).uppercased()
+    }
+
+    /// "Maya", "Maya and Jordan", "Maya, Jordan and Ari", "Maya, Jordan,
+    /// Ari and 2 others", by first name.
+    private static func peopleLabel(_ names: [String]) -> String {
+        let first = names.map { name in String(name.split(separator: " ").first ?? Substring(name)) }
+        guard first.count > maxFaces else { return first.formatted(.list(type: .and)) }
+        let more = first.count - maxFaces
+        return "\(first.prefix(maxFaces).joined(separator: ", ")) and \(more) \(more == 1 ? "other" : "others")"
     }
 
     /// The tile switches between the event and the rest of the day, or,
@@ -410,6 +504,8 @@ struct CalendarExpandedView: View {
         HStack(spacing: 8) {
             chip("Dismiss") { calendar.dismiss() }
             switch activity.phase {
+            case .upcoming where event.videoLink != nil, .starting where event.videoLink != nil:
+                chip("Join \(event.videoLink?.service ?? "")", background: .calendarJoin, foreground: .calendarJoinLabel) { calendar.joinMeeting() }
             case .upcoming where hasPlace, .leave where hasPlace:
                 chip("Directions", background: color, foreground: labelColor(on: color)) { calendar.openDirections() }
             case .allDay where event.isBirthday:
@@ -441,19 +537,21 @@ struct CalendarExpandedView: View {
     private static func title(_ activity: CalendarMonitor.Activity) -> String {
         switch activity.phase {
         case .leave: "Time to leave for \(activity.event.title)"
+        case .starting: "\(activity.event.title) is starting"
         case .tomorrow: "Tomorrow starts early"
         case .upcoming, .during, .allDay: activity.event.title
         }
     }
 
-    /// "3:00 – 3:45 PM · 450 Sutter St", "18 min by car · there by 2:58
-    /// PM", "Work · ends at 4:00 PM", "Today · turning 60 · from
-    /// Contacts", "Flight to Austin · SFO Terminal 2".
+    /// "3:00 – 3:45 PM · 450 Sutter St", "2:30 – 3:00 PM · Zoom", "18 min
+    /// by car · there by 2:58 PM", "Work · ends at 4:00 PM", "Ends at 3:00
+    /// PM" for a meeting, "Today · turning 60 · from Contacts", "Flight to
+    /// Austin · SFO Terminal 2".
     private func subtitle(_ activity: CalendarMonitor.Activity, at now: Date) -> String {
         let event = activity.event
-        let place = event.location ?? event.calendarTitle
+        let place = event.videoLink?.service ?? event.location ?? event.calendarTitle
         switch activity.phase {
-        case .upcoming:
+        case .upcoming, .starting:
             return [timeRange(event), place].filter { !$0.isEmpty }.joined(separator: " · ")
         case .leave:
             guard let travel = calendar.travelTime(event) else { return timeRange(event) }
@@ -461,7 +559,7 @@ struct CalendarExpandedView: View {
             return "\(drive) by car · there by \(clockTime(now.addingTimeInterval(travel)))"
         case .during:
             let ends = "ends at \(clockTime(event.end))"
-            return event.calendarTitle.isEmpty ? "Ends at \(clockTime(event.end))" : "\(event.calendarTitle) · \(ends)"
+            return event.calendarTitle.isEmpty || event.isMeeting ? "Ends at \(clockTime(event.end))" : "\(event.calendarTitle) · \(ends)"
         case .allDay:
             var parts = ["Today"]
             if let age = activity.age {
@@ -491,7 +589,7 @@ struct CalendarExpandedView: View {
             return "in \(durationText(minutes: minutes(until: event.start, from: now)))"
         case .tomorrow:
             return clockTime(event.start)
-        case .leave, .during, .allDay:
+        case .leave, .starting, .during, .allDay:
             return nil
         }
     }
@@ -574,8 +672,12 @@ struct CalendarExpandedView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// "450 Sutter St · leave at 2:40 PM", or the calendar it's in.
+    /// "450 Sutter St · leave at 2:40 PM", "Work · Zoom", or the calendar
+    /// it's in.
     private func rowSubtitle(_ event: CalendarEvent) -> String {
+        if let service = event.videoLink?.service {
+            return [event.calendarTitle, service].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
         guard let location = event.location else { return event.calendarTitle }
         guard let leaveAt = calendar.leaveAt(event) else { return location }
         return "\(location) · leave at \(clockTime(leaveAt))"

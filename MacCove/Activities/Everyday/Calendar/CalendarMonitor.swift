@@ -45,14 +45,68 @@ struct CalendarEvent: Identifiable, Equatable {
     let isBirthday: Bool
     /// The person whose birthday it is.
     let birthdayContactID: String?
-    /// A Zoom, Meet, Teams, Webex or FaceTime link: a meeting, which isn't
-    /// shown as an event, though it still counts as what's next.
-    let hasVideoLink: Bool
+    /// A Zoom, Meet, Teams, Webex or FaceTime link: a meeting, with a
+    /// button to join it.
+    var videoLink: VideoLink?
+    /// Who else is invited, by name, organizer included. Not those who
+    /// declined.
+    var attendees: [String] = []
     /// Repeats, so Calendar needs the occurrence's date to show this one
     /// rather than the first.
     var isRecurring = false
     /// When this occurrence was due to start, even if it's been moved.
     var occurrenceDate: Date?
+
+    var isMeeting: Bool {
+        videoLink != nil
+    }
+}
+
+/// Where a meeting happens, from its location, URL or notes.
+struct VideoLink: Equatable {
+    let url: URL
+    /// "Zoom", "Google Meet" and so on.
+    let service: String
+
+    /// The services known, by the domain their links are on.
+    private static let services: [(domain: String, name: String)] = [
+        ("zoom.us", "Zoom"),
+        ("meet.google.com", "Google Meet"),
+        ("teams.microsoft.com", "Teams"),
+        ("teams.live.com", "Teams"),
+        ("webex.com", "Webex"),
+        ("facetime.apple.com", "FaceTime"),
+    ]
+
+    private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    /// The first link to a known service in the text, in order.
+    static func find(in texts: [String?]) -> VideoLink? {
+        for text in texts.compactMap({ $0 }) where !text.isEmpty {
+            let range = NSRange(text.startIndex..., in: text)
+            let links = detector?.matches(in: text, range: range).compactMap(\.url) ?? []
+            if let link = links.lazy.compactMap(Self.init(url:)).first {
+                return link
+            }
+        }
+        return nil
+    }
+
+    /// Zoom's own subdomains, like us02web.zoom.us, count.
+    init?(url: URL) {
+        guard let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              let host = url.host()?.lowercased(),
+              let service = Self.services.first(where: { host == $0.domain || host.hasSuffix("." + $0.domain) }) else { return nil }
+        self.url = url
+        self.service = service.name
+    }
+
+    #if DEBUG
+    init(url: URL, service: String) {
+        self.url = url
+        self.service = service
+    }
+    #endif
 }
 
 /// Events from Calendar, as the notch shows them: minutes until the next
@@ -60,28 +114,32 @@ struct CalendarEvent: Identifiable, Equatable {
 /// and birthdays each morning, a heads-up the night before an early start,
 /// and the rest of the day.
 ///
-/// Reads EventKit with full access, asked for when Calendar Events is
-/// turned on, and again whenever Calendar's database changes. Events with
-/// a video link are meetings, which aren't shown here, and invitations
-/// you declined are skipped. With Show When to Leave on, MapKit's driving
-/// time from where you are gives a time to leave for events with a
-/// location.
+/// Reads EventKit with full access, asked for when Next Meeting is turned
+/// on, and again whenever Calendar's database changes. Events with a video
+/// link are meetings: they show a few minutes before, with a button to
+/// join, and open by themselves as they start. Invitations you declined
+/// are skipped. With Show When to Leave on, MapKit's driving time from
+/// where you are gives a time to leave for events with a location.
 @Observable
 final class CalendarMonitor {
     enum Event {
         /// Something new to show, or what's shown moved on.
         case started
-        /// Time to leave for the next event: opens by itself.
-        case timeToLeave
+        /// Time to leave for the next event, or a meeting starting: opens
+        /// by itself.
+        case needsYou
         /// Nothing left to show.
         case ended
     }
 
     enum Phase: String {
         /// Coming up in the next 15 minutes, or before the time to leave.
+        /// A meeting, in the next 5.
         case upcoming
         /// Time to leave, from the drive there.
         case leave
+        /// A meeting, for its first few minutes: time to join.
+        case starting
         /// On now.
         case during
         /// The day's all-day events and birthdays, once each morning.
@@ -189,6 +247,13 @@ final class CalendarMonitor {
     private static let refetchInterval: TimeInterval = 5 * 60
     /// How long before it starts an event shows.
     static let upcomingLead: TimeInterval = 15 * 60
+    /// And a meeting, with nothing to get ready for.
+    static let meetingLead: TimeInterval = 5 * 60
+    /// How long a meeting shows as starting, with the button to join,
+    /// before it's just on.
+    private static let startingWindow: TimeInterval = 5 * 60
+    /// Zoom's app, which joins from its own link without a browser tab.
+    private static let zoomBundleIdentifier = "us.zoom.xos"
     /// How long before the time to leave an event shows, when the drive is
     /// longer than that.
     private static let leaveLead: TimeInterval = 10 * 60
@@ -217,10 +282,6 @@ final class CalendarMonitor {
     /// A location older than this is asked for again.
     private static let locationLifetime: TimeInterval = 10 * 60
     private static let searchRadius: CLLocationDistance = 300_000
-    /// Text in an event's location, notes or URL that marks a meeting.
-    private static let videoLinkHosts = [
-        "zoom.us/", "meet.google.com/", "teams.microsoft.com/", "teams.live.com/", "webex.com/", "facetime.apple.com/",
-    ]
 
     var isShown: Bool {
         activity != nil || isAgendaOpen
@@ -424,7 +485,7 @@ final class CalendarMonitor {
         guard let start = event.startDate, let end = event.endDate,
               event.status != .canceled, !isDeclined(event) else { return nil }
         let calendar: EKCalendar? = event.calendar
-        let hasVideoLink = hasVideoLink(event)
+        let videoLink = VideoLink.find(in: [event.url?.absoluteString, event.location, event.notes])
         let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines)
         let geo = event.structuredLocation?.geoLocation?.coordinate
         let title = event.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -442,7 +503,8 @@ final class CalendarMonitor {
             color: calendar?.color.map { Color(nsColor: $0) } ?? .calendarEvent,
             isBirthday: calendar?.type == .birthday,
             birthdayContactID: event.birthdayContactIdentifier,
-            hasVideoLink: hasVideoLink,
+            videoLink: videoLink,
+            attendees: videoLink == nil ? [] : attendees(of: event),
             isRecurring: event.hasRecurrenceRules,
             occurrenceDate: event.occurrenceDate
         )
@@ -452,12 +514,26 @@ final class CalendarMonitor {
         event.attendees?.contains { $0.isCurrentUser && $0.participantStatus == .declined } == true
     }
 
-    private static func hasVideoLink(_ event: EKEvent) -> Bool {
-        let text = [event.location, event.notes, event.url?.absoluteString]
-            .compactMap { $0 }
-            .joined(separator: " ")
-            .lowercased()
-        return videoLinkHosts.contains { text.contains($0) }
+    /// The organizer first, then everyone else invited, but not you, the
+    /// rooms booked, or those who declined.
+    private static func attendees(of event: EKEvent) -> [String] {
+        let people = ([event.organizer].compactMap { $0 } + (event.attendees ?? []))
+            .filter { !$0.isCurrentUser && $0.participantType != .room && $0.participantType != .resource && $0.participantStatus != .declined }
+        var seen = Set<URL>()
+        return people.compactMap { person in
+            guard seen.insert(person.url).inserted else { return nil }
+            return displayName(of: person)
+        }
+    }
+
+    /// Their name, or the start of their email address without one.
+    private static func displayName(of person: EKParticipant) -> String? {
+        if let name = person.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty, !name.contains("@") {
+            return name
+        }
+        let address = person.url.absoluteString.replacingOccurrences(of: "mailto:", with: "", options: [.caseInsensitive, .anchored])
+        let local = address.split(separator: "@").first.map(String.init)?.removingPercentEncoding ?? ""
+        return local.isEmpty ? nil : local
     }
 
     // MARK: - What shows
@@ -488,8 +564,10 @@ final class CalendarMonitor {
         }
         let previousKey = activity?.key
         let current = timed ?? headsUp.flatMap { dismissed.contains($0.key) ? nil : $0 }
-        if current?.phase == .leave, current?.key != previousKey {
-            // The notch opens on the time to leave, not the rest of the day.
+        let needsYou = current?.phase == .leave || current?.phase == .starting
+        if needsYou, current?.key != previousKey {
+            // The notch opens on the time to leave, or the meeting, not the
+            // rest of the day.
             isAgendaOpen = false
         }
         if current != activity {
@@ -502,8 +580,8 @@ final class CalendarMonitor {
         refreshTravel(at: now)
 
         guard current?.key != previousKey else { return }
-        if let current {
-            onEvent?(current.phase == .leave ? .timeToLeave : .started)
+        if current != nil {
+            onEvent?(needsYou ? .needsYou : .started)
         } else if !isAgendaOpen {
             onEvent?(.ended)
         }
@@ -511,7 +589,6 @@ final class CalendarMonitor {
 
     private func timedActivity(at now: Date) -> Activity? {
         let timed = events.filter { !$0.isAllDay }
-        let shown = timed.filter { !$0.hasVideoLink }
 
         func first(_ phase: Phase, of events: [CalendarEvent]) -> Activity? {
             events.lazy
@@ -519,8 +596,9 @@ final class CalendarMonitor {
                 .first { !self.dismissed.contains($0.key) }
         }
 
-        let leaving = shown.filter { event in
-            guard now < event.start else { return false }
+        // Meetings have no drive, so never a time to leave.
+        let leaving = timed.filter { event in
+            guard !event.isMeeting, now < event.start else { return false }
             if leavingFor.contains(event.id) { return true }
             guard let leaveAt = leaveAt(event) else { return false }
             return now >= leaveAt
@@ -528,17 +606,25 @@ final class CalendarMonitor {
         if let activity = first(.leave, of: leaving) {
             return activity
         }
-        let upcoming = shown.filter { event in
-            let showFrom = min(
-                event.start.addingTimeInterval(-Self.upcomingLead),
-                leaveAt(event)?.addingTimeInterval(-Self.leaveLead) ?? .distantFuture
-            )
+        let starting = timed.filter { event in
+            event.isMeeting && now >= event.start && now < min(event.end, event.start.addingTimeInterval(Self.startingWindow))
+        }
+        if let activity = first(.starting, of: starting) {
+            return activity
+        }
+        let upcoming = timed.filter { event in
+            let showFrom = event.isMeeting
+                ? event.start.addingTimeInterval(-Self.meetingLead)
+                : min(
+                    event.start.addingTimeInterval(-Self.upcomingLead),
+                    leaveAt(event)?.addingTimeInterval(-Self.leaveLead) ?? .distantFuture
+                )
             return now >= showFrom && now < event.start
         }
         if let activity = first(.upcoming, of: upcoming) {
             return activity
         }
-        let during = shown
+        let during = timed
             .filter { now >= $0.start && now < $0.end && $0.end.timeIntervalSince($0.start) <= Self.maxDuringLength }
             .sorted { $0.end < $1.end }
         if var activity = first(.during, of: during) {
@@ -630,7 +716,7 @@ final class CalendarMonitor {
     private func refreshTravel(at now: Date) {
         guard canUseLocation else { return }
         let due = events.filter { event in
-            guard !event.isAllDay, !event.hasVideoLink, event.location != nil || event.coordinate != nil,
+            guard !event.isAllDay, !event.isMeeting, event.location != nil || event.coordinate != nil,
                   event.start > now, event.start.timeIntervalSince(now) < Self.travelLookAhead,
                   !travelInFlight.contains(event.id) else { return false }
             return travelFetchedAt[event.id].map { now.timeIntervalSince($0) > Self.travelRefreshInterval } ?? true
@@ -744,6 +830,10 @@ final class CalendarMonitor {
             // Not back to the minutes until it starts.
             dismissed.insert(Activity(phase: .upcoming, event: activity.event).key)
         }
+        if activity.phase == .starting {
+            // Not joining, so not the time left either. Join keeps it.
+            dismissed.insert(Activity(phase: .during, event: activity.event).key)
+        }
         if activity.key == headsUp?.key {
             headsUp = nil
             headsUpTimer?.cancel()
@@ -789,6 +879,36 @@ final class CalendarMonitor {
               let url = URL(string: "maps://?daddr=\(encoded)&dirflg=d") else { return }
         NSWorkspace.shared.open(url)
         dismiss()
+    }
+
+    /// The meeting's link: Zoom's straight in its app when it's there,
+    /// the rest in the browser, which hands over to their apps. Once
+    /// joined, it doesn't ask again as it starts; the time left still
+    /// shows once it's on.
+    func joinMeeting() {
+        guard let activity, let link = activity.event.videoLink else { return }
+        NSWorkspace.shared.open(Self.appURL(for: link) ?? link.url)
+        dismissed.insert(Activity(phase: .upcoming, event: activity.event).key)
+        dismissed.insert(Activity(phase: .starting, event: activity.event).key)
+        isAgendaOpen = false
+        update()
+    }
+
+    /// zoommtg://zoom.us/join?confno=…&pwd=… for a zoom.us/j/… link, when
+    /// Zoom is installed.
+    private static func appURL(for link: VideoLink) -> URL? {
+        guard link.service == "Zoom",
+              NSWorkspace.shared.urlForApplication(withBundleIdentifier: zoomBundleIdentifier) != nil,
+              let components = URLComponents(url: link.url, resolvingAgainstBaseURL: false) else { return nil }
+        let parts = components.path.split(separator: "/")
+        guard let index = parts.firstIndex(of: "j"), parts.indices.contains(index + 1) else { return nil }
+        var app = URLComponents()
+        app.scheme = "zoommtg"
+        app.host = "zoom.us"
+        app.path = "/join"
+        app.queryItems = [URLQueryItem(name: "confno", value: String(parts[index + 1]))]
+            + (components.queryItems?.filter { $0.name == "pwd" } ?? [])
+        return app.url
     }
 
     func openInCalendar() {
@@ -912,6 +1032,12 @@ extension Color {
     static let calendarEvent = Color(red: 191 / 255, green: 90 / 255, blue: 242 / 255)
     /// The design's pink for birthdays.
     static let calendarBirthday = Color(red: 1, green: 55 / 255, blue: 95 / 255)
+    /// The design's blue for meetings.
+    static let calendarMeeting = Color(red: 10 / 255, green: 132 / 255, blue: 1)
+    /// The design's green as a meeting starts, and for Join.
+    static let calendarJoin = Color(red: 48 / 255, green: 209 / 255, blue: 88 / 255)
+    /// Dark green on Join.
+    static let calendarJoinLabel = Color(red: 6 / 255, green: 33 / 255, blue: 15 / 255)
 }
 
 #if DEBUG
