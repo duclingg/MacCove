@@ -54,6 +54,7 @@ struct MacCoveApp: App {
                 .environment(appDelegate.clipboard)
                 .environment(appDelegate.calendar)
                 .environment(appDelegate.updates)
+                .environment(appDelegate.notchCommands)
         }
         .windowResizability(.contentSize)
     }

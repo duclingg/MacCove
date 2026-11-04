@@ -711,7 +711,7 @@ final class CalendarMonitor {
 
     // MARK: - Actions
 
-    /// From the menu bar, or the tile of the event shown.
+    /// From Settings › Activities, or the tile of the event shown.
     func showToday() {
         leaving?.cancel()
         today = agenda(at: .now)

@@ -899,8 +899,8 @@ final class NotchViewModel {
         }
     }
 
-    /// From the menu bar: the rest of the day, opened and then closed the
-    /// way the clipboard history is.
+    /// From Settings › Activities: the rest of the day, opened and then
+    /// closed the way the clipboard history is.
     func showTodayEvents() {
         guard !isSigningIn, batteryAlert == nil else { return }
         calendar.showToday()
@@ -917,9 +917,9 @@ final class NotchViewModel {
         }
     }
 
-    /// From the menu bar: opens the history over whatever else is open,
-    /// then shrinks back to the pill after a while if the cursor never
-    /// comes, and leaves.
+    /// From Settings › Activities: opens the history over whatever else is
+    /// open, then shrinks back to the pill after a while if the cursor
+    /// never comes, and leaves.
     func showClipboardHistory() {
         guard !isSigningIn, batteryAlert == nil else { return }
         clipboard.showHistory()

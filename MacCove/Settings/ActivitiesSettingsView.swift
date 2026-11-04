@@ -15,6 +15,7 @@ struct ActivitiesSettingsView: View {
     @Environment(ClipboardMonitor.self) private var clipboard
     @Environment(CalendarMonitor.self) private var calendar
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
+    @Environment(NotchCommands.self) private var notch
     @State private var isClipboardRestricted = false
 
     // MARK: View
@@ -58,6 +59,16 @@ struct ActivitiesSettingsView: View {
                         }
                     )
                 )
+                if isClipboardEnabled {
+                    LabeledContent {
+                        Button("Show History") {
+                            notch.showClipboardHistory()
+                        }
+                    } label: {
+                        Text("Your recent copies")
+                        Text("Opens in the notch")
+                    }
+                }
                 if isClipboardEnabled, isClipboardRestricted {
                     allowRow(
                         "macOS asks before MacCove reads each copy",
@@ -142,6 +153,14 @@ struct ActivitiesSettingsView: View {
             if !calendar.calendars.isEmpty {
                 calendarPicker
             }
+            LabeledContent {
+                Button("Show Today") {
+                    notch.showTodayEvents()
+                }
+            } label: {
+                Text("The rest of today")
+                Text("Opens in the notch")
+            }
             activityToggle(
                 "Show when to leave",
                 detail: "For events with a place, from where you are",
@@ -203,5 +222,6 @@ struct ActivitiesSettingsView: View {
         .environment(SignInMonitor())
         .environment(ClipboardMonitor())
         .environment(CalendarMonitor())
+        .environment(NotchCommands())
 }
 #endif

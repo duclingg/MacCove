@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var github = GitHubMonitor()
     private(set) lazy var calendar = CalendarMonitor()
     private(set) lazy var updates = UpdateChecker()
+    /// What Settings can open in the notch.
+    let notchCommands = NotchCommands()
     
     /// Opens Settings, given by `MacCoveApp`, which can open windows.
     var showSettings: (() -> Void)?
@@ -61,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             calendar: calendar
         )
         self.viewModel = viewModel
+        notchCommands.showClipboardHistory = { [weak viewModel] in viewModel?.showClipboardHistory() }
+        notchCommands.showTodayEvents = { [weak viewModel] in viewModel?.showTodayEvents() }
         notchController = NotchWindowController(viewModel: viewModel)
         nowPlaying.start()
         battery.start()
@@ -103,14 +107,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             clipboard.stop()
         }
-    }
-    
-    func showClipboardHistory() {
-        viewModel?.showClipboardHistory()
-    }
-    
-    func showTodayEvents() {
-        viewModel?.showTodayEvents()
     }
     
     func showGitHubSetup() {
