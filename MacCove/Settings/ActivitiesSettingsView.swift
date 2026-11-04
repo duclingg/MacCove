@@ -15,6 +15,7 @@ struct ActivitiesSettingsView: View {
     @Environment(ClipboardMonitor.self) private var clipboard
     @Environment(CalendarMonitor.self) private var calendar
     @Environment(RemindersMonitor.self) private var reminders
+    @Environment(DeviceBatteryMonitor.self) private var deviceBatteries
     @Environment(FileShelf.self) private var shelf
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
     @Environment(NotchCommands.self) private var notch
@@ -104,6 +105,21 @@ struct ActivitiesSettingsView: View {
                         Text("Opens in the notch")
                     }
                 }
+                activityToggle("Device batteries", detail: deviceBatteriesDetail, isOn: Binding(
+                    get: { deviceBatteries.isEnabled },
+                    set: { deviceBatteries.setEnabled($0) }
+                ))
+                if deviceBatteries.isEnabled, !deviceBatteries.devices.isEmpty {
+                    let count = deviceBatteries.devices.count
+                    LabeledContent {
+                        Button("Show Devices") {
+                            notch.showDeviceBatteries()
+                        }
+                    } label: {
+                        Text(count == 1 ? "1 device connected" : "\(count) devices connected")
+                        Text("Opens in the notch")
+                    }
+                }
             } header: {
                 Text("Everyday")
             } footer: {
@@ -149,6 +165,11 @@ struct ActivitiesSettingsView: View {
     private var batteryDetail: String {
         let levels = BatteryMonitor.lowBatteryThresholds.map { "\($0)%" }
         return "Warns at \(levels.formatted(.list(type: .and))), and shows when it’s charging"
+    }
+
+    private var deviceBatteriesDetail: String {
+        let levels = DeviceBatteryMonitor.lowThresholds.map { "\($0)%" }
+        return "Mice, keyboards, trackpads and controllers. Warns at \(levels.formatted(.list(type: .and)))."
     }
 
     // MARK: Calendar
@@ -285,6 +306,7 @@ struct ActivitiesSettingsView: View {
         .environment(ClipboardMonitor())
         .environment(CalendarMonitor())
         .environment(RemindersMonitor())
+        .environment(DeviceBatteryMonitor())
         .environment(FileShelf(loadsSaved: false))
         .environment(NotchCommands())
 }

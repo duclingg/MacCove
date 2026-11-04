@@ -22,10 +22,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var github = GitHubMonitor()
     private(set) lazy var calendar = CalendarMonitor()
     private(set) lazy var reminders = RemindersMonitor()
+    private(set) lazy var deviceBatteries = DeviceBatteryMonitor()
     private(set) lazy var shelf = FileShelf()
     private(set) lazy var updates = UpdateChecker()
     /// What Settings can open in the notch.
     let notchCommands = NotchCommands()
+    /// Settings and Quit, unless it's hidden here or in System Settings.
+    let menuBarItem = MenuBarItem()
     
     /// Opens Settings, given by `MacCoveApp`, which can open windows.
     var showSettings: (() -> Void)?
@@ -64,13 +67,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             clipboard: clipboard,
             calendar: calendar,
             reminders: reminders,
+            deviceBatteries: deviceBatteries,
             shelf: shelf
         )
         self.viewModel = viewModel
         notchCommands.showClipboardHistory = { [weak viewModel] in viewModel?.showClipboardHistory() }
         notchCommands.showTodayEvents = { [weak viewModel] in viewModel?.showTodayEvents() }
         notchCommands.showShelf = { [weak viewModel] in viewModel?.showShelf() }
+        notchCommands.showDeviceBatteries = { [weak viewModel] in viewModel?.showDeviceBatteries() }
         notchController = NotchWindowController(viewModel: viewModel)
+        menuBarItem.showSettings = { [weak self] in self?.showSettings?() }
+        menuBarItem.onOpen = { [weak self] in
+            guard let self else { return }
+            self.calendar.refreshPermissions()
+            self.reminders.refreshPermissions()
+        }
+        menuBarItem.install()
         nowPlaying.start()
         battery.start()
         signIn.start()
@@ -82,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         calendar.start()
         reminders.start()
+        deviceBatteries.start()
         updates.startAutomaticChecks()
         
         // Hook events from Claude Code, by the agent they're for.

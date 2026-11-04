@@ -10,13 +10,13 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     // MARK: AppStorage
-    @AppStorage(NotchSettings.showInMenuBarKey) private var showInMenuBar = true
     @AppStorage(NotchSettings.openingKey) private var notchOpens = NotchSettings.defaultOpening
     @AppStorage(NotchSettings.trackpadFeedbackKey) private var trackpadFeedback = true
     @AppStorage(NotchSettings.hideInFullScreenKey) private var hideInFullScreen = true
     @AppStorage(NotchSettings.maxActivitiesKey) private var maxActivities = NotchSettings.defaultMaxActivities
 
     // MARK: States
+    @Environment(MenuBarItem.self) private var menuBar
     @State private var launchAtLogin = LaunchAtLogin()
     @State private var isConfirmingReset = false
 
@@ -27,9 +27,12 @@ struct GeneralSettingsView: View {
                     get: { launchAtLogin.isEnabled },
                     set: { launchAtLogin.setEnabled($0) }
                 ))
-                Toggle(isOn: $showInMenuBar) {
+                Toggle(isOn: Binding(
+                    get: { menuBar.isShown },
+                    set: { menuBar.setShown($0) }
+                )) {
                     Text("Show MacCove in the menu bar")
-                    Text("Settings and Quit live there. If hidden, open MacCove again to see this window.")
+                    Text("Settings and Quit live there. The same switch is in System Settings › Menu Bar. If hidden, open MacCove again to see this window.")
                 }
                 Picker("Open the notch", selection: $notchOpens) {
                     ForEach(NotchSettings.Opening.allCases, id: \.self) { opening in
@@ -109,5 +112,6 @@ struct GeneralSettingsView: View {
 #if DEBUG
 #Preview {
     GeneralSettingsView()
+        .environment(MenuBarItem())
 }
 #endif

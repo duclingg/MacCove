@@ -41,6 +41,9 @@ enum IslandActivity: Hashable {
     case calendar
     /// A reminder that's due, or the day's list when several are.
     case reminders
+    /// A mouse, keyboard or controller running low, connecting or
+    /// charging, or every device's level.
+    case deviceBatteries
     /// Files dropped on the notch, or a file drag on its way to it.
     case shelf
     case nowPlaying
@@ -50,7 +53,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .reminders, .shelf, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .shelf, .nowPlaying: .zero
         }
     }
 }
@@ -109,6 +112,7 @@ final class NotchViewModel {
     let clipboard: ClipboardMonitor
     let calendar: CalendarMonitor
     let reminders: RemindersMonitor
+    let deviceBatteries: DeviceBatteryMonitor
     let shelf: FileShelf
 
     var notchSize = CGSize(width: 186, height: 37)
@@ -193,6 +197,7 @@ final class NotchViewModel {
         clipboard: ClipboardMonitor,
         calendar: CalendarMonitor,
         reminders: RemindersMonitor,
+        deviceBatteries: DeviceBatteryMonitor,
         shelf: FileShelf
     ) {
         self.nowPlaying = nowPlaying
@@ -206,6 +211,7 @@ final class NotchViewModel {
         self.clipboard = clipboard
         self.calendar = calendar
         self.reminders = reminders
+        self.deviceBatteries = deviceBatteries
         self.shelf = shelf
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
@@ -257,6 +263,13 @@ final class NotchViewModel {
             self?.remindersEvent(event)
         }
         reminders.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.isHovering || self.presentation == .expanded
+        }
+        deviceBatteries.onEvent = { [weak self] event in
+            self?.deviceBatteriesEvent(event)
+        }
+        deviceBatteries.isInUse = { [weak self] in
             guard let self else { return false }
             return self.isHovering || self.presentation == .expanded
         }
@@ -353,6 +366,9 @@ final class NotchViewModel {
         }
         if isShowingAll, reminders.isShown {
             running.append(.reminders)
+        }
+        if isShowingAll, deviceBatteries.isShown {
+            running.append(.deviceBatteries)
         }
         // Files wait just ahead of music. A file dragged near goes ahead
         // of everything, since that's what you're doing right now.
@@ -459,6 +475,7 @@ final class NotchViewModel {
             case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
             case .calendar?: CalendarCompactView.width(for: calendar, notch: notch)
             case .reminders?: RemindersCompactView.width(for: reminders, notch: notch)
+            case .deviceBatteries?: DeviceBatteryCompactView.width(for: deviceBatteries, notch: notch)
             case .shelf?: ShelfCompactView.width(for: shelf, notch: notch)
             case .claudeCode?: Self.compactWidth(notch: notch)
             default: Self.compactWidth(notch: notch)
@@ -478,6 +495,7 @@ final class NotchViewModel {
             case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
             case .calendar?: CalendarExpandedView.bodyHeight(for: calendar)
             case .reminders?: RemindersExpandedView.bodyHeight(for: reminders)
+            case .deviceBatteries?: DeviceBatteryExpandedView.bodyHeight(for: deviceBatteries)
             case .shelf?: ShelfExpandedView.bodyHeight(for: shelf)
             default: BatteryExpandedView.bodyHeight
             }
@@ -725,7 +743,7 @@ final class NotchViewModel {
         case .signIn, .charging, .lowBattery: false
         case .claudeCode: !claude.needsAnswer
         case .shelf: shelf.dragPhase == nil
-        case .xcode, .terminal, .github, .clipboard, .calendar, .reminders, .nowPlaying: true
+        case .xcode, .terminal, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .nowPlaying: true
         }
     }
 
@@ -747,7 +765,7 @@ final class NotchViewModel {
         case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
         case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
         case .reminders: return frontID == RemindersMonitor.appBundleIdentifier
-        case .github, .clipboard, .shelf, .signIn, .charging, .lowBattery: return false
+        case .github, .clipboard, .deviceBatteries, .shelf, .signIn, .charging, .lowBattery: return false
         }
     }
 
@@ -789,6 +807,7 @@ final class NotchViewModel {
             clipboard.leaveIfDue(after: .seconds(1.2))
             calendar.leaveIfDue(after: .seconds(1.2))
             reminders.leaveIfDue(after: .seconds(1.2))
+            deviceBatteries.leaveIfDue(after: .seconds(1.2))
         }
     }
 
@@ -950,6 +969,34 @@ final class NotchViewModel {
         switch event {
         case .started: activityStarted(.reminders)
         case .ended: activityEnded(.reminders)
+        }
+    }
+
+    /// A device running low, connecting or charging just shows, beside the
+    /// notch.
+    private func deviceBatteriesEvent(_ event: DeviceBatteryMonitor.Event) {
+        switch event {
+        case .started: activityStarted(.deviceBatteries)
+        case .ended: activityEnded(.deviceBatteries)
+        }
+    }
+
+    /// From Settings › Activities: every device's battery, opened and then
+    /// closed the way the clipboard history is.
+    func showDeviceBatteries() {
+        guard !isSigningIn, batteryAlert == nil else { return }
+        deviceBatteries.showList()
+        unhide(.deviceBatteries)
+        collapseTask?.cancel()
+        failureCollapseTask?.cancel()
+        expandedActivity = .deviceBatteries
+        presentation = .expanded
+        failureCollapseTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.failureOpenDuration)
+            guard !Task.isCancelled, let self, !self.isHovering,
+                  self.presentation == .expanded, self.expandedActivity == .deviceBatteries else { return }
+            self.presentation = .compact
+            self.deviceBatteries.leaveIfDue(after: .seconds(1.2))
         }
     }
 
@@ -1176,6 +1223,7 @@ final class NotchViewModel {
             self.clipboard.leaveIfDue(after: .seconds(1.2))
             self.calendar.leaveIfDue(after: .seconds(1.2))
             self.reminders.leaveIfDue(after: .seconds(1.2))
+            self.deviceBatteries.leaveIfDue(after: .seconds(1.2))
         }
     }
 }
