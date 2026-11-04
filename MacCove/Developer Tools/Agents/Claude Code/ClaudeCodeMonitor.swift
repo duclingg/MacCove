@@ -7,14 +7,16 @@
 
 import AppKit
 
-/// Claude Code sessions, as the island shows them: working, waiting for
-/// you, then finished.
+/// Coding agent sessions, from Claude Code and Codex, as the notch shows
+/// them: working, waiting for you, then finished.
 ///
-/// Claude Code runs the hook MacCove adds to ~/.claude/settings.json (see
-/// `ClaudeCodeSetup`) for each event, which reaches `handle(_:)` through
-/// `AgentBridge`. Most events only report. A permission request, a
-/// question (AskUserQuestion) and a finished plan (ExitPlanMode) wait for
-/// the island's answer, which goes back to Claude Code as the hook's.
+/// Each agent runs the hook MacCove adds to its settings (see
+/// `ClaudeCodeSetup` and `CodexSetup`) for each event, which reaches
+/// `handle(_:)` through `AgentBridge` at "/claude/…" or "/codex/…". Most
+/// events only report. A permission request, and Claude's question
+/// (AskUserQuestion) and finished plan (ExitPlanMode), wait for the
+/// notch's answer, which goes back to the agent as the hook's. Both take
+/// a permission decision in the same shape.
 @Observable
 final class ClaudeCodeMonitor {
     enum Event {
@@ -112,13 +114,15 @@ final class ClaudeCodeMonitor {
     }
 
     struct Session: Equatable, Identifiable {
+        /// The agent's own session ID, after the agent: "codex/…".
         let id: String
+        var agent: AITool = .claude
         var folder: String
         /// The prompt that started this turn.
         var task: String
         /// What it's doing now: "Editing NotchWindowController.swift".
         var activity: String?
-        /// From Claude's task list, when the model keeps one.
+        /// From the agent's task list or plan, when the model keeps one.
         var tasksDone = 0
         var taskCount = 0
         var toolUses = 0
@@ -126,8 +130,8 @@ final class ClaudeCodeMonitor {
         var startedAt: Date
         var finishedAt: Date?
         var phase: Phase
-        /// The app the session's terminal runs in, its tty, and Claude
-        /// Code's process.
+        /// The app the session's terminal runs in, its tty, and the
+        /// agent's process.
         var appBundleIdentifier: String?
         var tty: String?
         var pid: pid_t?
@@ -167,19 +171,20 @@ final class ClaudeCodeMonitor {
     @ObservationIgnored private var hooksRemovedObserver: NSObjectProtocol?
 
     init() {
-        // Once the hooks are out, the sessions shown hear nothing more,
-        // not even their SessionEnd, so they leave the island now.
+        // Once an agent's hooks are out, its sessions hear nothing more,
+        // not even their SessionEnd, so they leave the notch now.
         hooksRemovedObserver = NotificationCenter.default.addObserver(
-            forName: .claudeCodeHooksRemoved,
+            forName: .agentHooksRemoved,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.endAll() }
+        ) { [weak self] notification in
+            let agent = notification.object as? AITool
+            MainActor.assumeIsolated { self?.endAll(agent) }
         }
     }
 
-    /// Just under the hook's 10 minutes, so Claude Code gets an answer,
-    /// and asks in the terminal, rather than timing the hook out.
+    /// Just under the hook's 10 minutes, so the agent gets an answer, and
+    /// asks in the terminal, rather than timing the hook out.
     private static let answerTimeout: Duration = .seconds(590)
     /// Asked through their own hook, which waits for the island.
     private static let toolsThatAsk: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
@@ -189,8 +194,11 @@ final class ClaudeCodeMonitor {
 
     func handle(_ request: AgentBridge.Request) async -> AgentBridge.Response {
         let event = (request.path as NSString).lastPathComponent
-        guard let input = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any],
-              let id = input["session_id"] as? String else { return .empty }
+        guard let agent = Self.agent(of: request),
+              let input = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any],
+              let sessionID = input["session_id"] as? String else { return .empty }
+        // Two agents could, in principle, pick the same ID.
+        let id = "\(agent.rawValue)/\(sessionID)"
         let folder = input["cwd"] as? String ?? ""
 
         switch event {
@@ -224,6 +232,9 @@ final class ClaudeCodeMonitor {
             }
         case "Stop":
             finish(id)
+        case "Interrupt":
+            // Codex's Esc mid-turn, which ends with no Stop.
+            end(id)
         case "SessionEnd":
             end(id)
         default:
@@ -316,8 +327,8 @@ final class ClaudeCodeMonitor {
         }
     }
 
-    /// Interrupts the turn with Esc in its terminal. Claude Code reports no
-    /// Stop for that, so the session leaves the island here.
+    /// Interrupts the turn with Esc in its terminal. Neither agent reports
+    /// a Stop for that, so the session leaves the notch here.
     func stop() {
         guard let shown = session, shown.phase == .working else { return }
         if TerminalWindow.pressEscape(appBundleIdentifier: shown.appBundleIdentifier, tty: shown.tty) {
@@ -328,7 +339,7 @@ final class ClaudeCodeMonitor {
     // MARK: - Session changes
 
     private func begin(_ id: String, folder: String, task: String, request: AgentBridge.Request) {
-        var session = sessions[id] ?? Session(id: id, folder: folder, task: task, startedAt: .now, phase: .working)
+        var session = sessions[id] ?? Session(id: id, agent: Self.agent(of: request) ?? .claude, folder: folder, task: task, startedAt: .now, phase: .working)
         // Interrupted while waiting, so it was never answered.
         if let promptID = session.phase.promptID {
             resolve(promptID, with: .empty)
@@ -351,8 +362,14 @@ final class ClaudeCodeMonitor {
         watchProcesses()
     }
 
+    /// The agent a hook event is from, by the start of its path:
+    /// "/codex/PermissionRequest".
+    private static func agent(of request: AgentBridge.Request) -> AITool? {
+        request.path.split(separator: "/").first.flatMap { AITool(rawValue: String($0)) }
+    }
+
     /// Where the session runs, from what the hook script adds: the app its
-    /// terminal is in, the terminal's tty and Claude Code's process.
+    /// terminal is in, the terminal's tty and the agent's process.
     private static func attach(_ request: AgentBridge.Request, to session: inout Session) {
         let headers = request.headers
         if let app = headers["x-maccove-app"], !app.isEmpty {
@@ -393,10 +410,11 @@ final class ClaudeCodeMonitor {
         onEvent?(.finished)
     }
 
-    /// Every session, as if each had ended. Anything waiting goes back to
-    /// Claude Code unanswered, so it asks in the terminal.
-    private func endAll() {
-        for id in sessions.keys {
+    /// Every session of an agent, or of all of them, as if each had ended.
+    /// Anything waiting goes back unanswered, so the agent asks in the
+    /// terminal.
+    private func endAll(_ agent: AITool?) {
+        for (id, session) in sessions where agent == nil || session.agent == agent {
             end(id)
         }
     }
@@ -417,7 +435,9 @@ final class ClaudeCodeMonitor {
         let tool = input["tool_name"] as? String ?? "Tool"
         guard !Self.toolsThatAsk.contains(tool) else { return .empty }
         let toolInput = input["tool_input"] as? [String: Any] ?? [:]
-        let suggestions = input["permission_suggestions"] as? [[String: Any]] ?? []
+        // Codex turns down a decision that adds rules, so it gets no
+        // Always Allow.
+        let suggestions = Self.agent(of: request) == .claude ? input["permission_suggestions"] as? [[String: Any]] ?? [] : []
         let approval = Approval(
             title: Self.approvalTitle(tool: tool, input: toolInput),
             detail: Self.approvalDetail(tool: tool, input: toolInput),
@@ -445,7 +465,14 @@ final class ClaudeCodeMonitor {
     /// appears for it.
     private func waitForAnswer(_ phase: Phase, in id: String, input: [String: Any], request: AgentBridge.Request) async -> AgentBridge.Response {
         guard let promptID = phase.promptID else { return .empty }
-        var session = sessions[id] ?? Session(id: id, folder: input["cwd"] as? String ?? "", task: "Working", startedAt: .now, phase: .working)
+        var session = sessions[id] ?? Session(
+            id: id,
+            agent: Self.agent(of: request) ?? .claude,
+            folder: input["cwd"] as? String ?? "",
+            task: "Working",
+            startedAt: .now,
+            phase: .working
+        )
         Self.attach(request, to: &session)
         sessions[id] = session
         watchProcesses()
@@ -492,7 +519,7 @@ final class ClaudeCodeMonitor {
         onEvent?(.answered)
     }
 
-    /// Unanswered for too long: Claude Code asks in the terminal instead.
+    /// Unanswered for too long: the agent asks in the terminal instead.
     private func expire(_ promptID: UUID, in id: String) {
         guard pendingAnswers[promptID] != nil else { return }
         if sessions[id]?.phase.promptID == promptID {
@@ -518,7 +545,7 @@ final class ClaudeCodeMonitor {
         return .json(["hookSpecificOutput": output])
     }
 
-    /// A session whose Claude Code has quit, with its terminal, leaves.
+    /// A session whose agent has quit, with its terminal, leaves.
     private func watchProcesses() {
         guard processCheck == nil else { return }
         processCheck = Task { [weak self] in
@@ -534,7 +561,7 @@ final class ClaudeCodeMonitor {
         }
     }
 
-    // MARK: - Describing what Claude does
+    // MARK: - Describing what the agent does
 
     private static func firstLine(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
@@ -546,24 +573,59 @@ final class ClaudeCodeMonitor {
         (input?["file_path"] as? String ?? input?["notebook_path"] as? String).map { ($0 as NSString).lastPathComponent }
     }
 
+    /// A shell command's text. Codex's older shell tools give it as the
+    /// command's arguments.
+    private static func shellCommand(_ input: [String: Any]?) -> String? {
+        if let command = input?["command"] as? String { return command }
+        if let arguments = input?["command"] as? [String] {
+            // `bash -lc "…"`: the script is what was meant.
+            if arguments.count == 3, ["-c", "-lc"].contains(arguments[1]) { return arguments[2] }
+            return arguments.joined(separator: " ")
+        }
+        return nil
+    }
+
+    /// The files a Codex patch adds, changes or deletes, as its headers
+    /// give them, relative to the session's folder.
+    static func patchFiles(_ input: [String: Any]?) -> [String] {
+        guard let patch = input?["command"] as? String ?? input?["patch"] as? String ?? input?["input"] as? String else { return [] }
+        let headers = ["*** Add File: ", "*** Update File: ", "*** Delete File: "]
+        var files: [String] = []
+        for line in patch.split(whereSeparator: \.isNewline) {
+            guard let header = headers.first(where: { line.hasPrefix($0) }) else { continue }
+            let path = line.dropFirst(header.count).trimmingCharacters(in: .whitespaces)
+            if !path.isEmpty, !files.contains(path) {
+                files.append(path)
+            }
+        }
+        return files
+    }
+
     /// "Editing IslandView.swift", "Running swift test", or the tool's name.
     static func describe(tool: String?, input: [String: Any]?) -> String? {
         guard let tool else { return nil }
         switch tool {
         case "Edit", "MultiEdit", "Write", "NotebookEdit":
             return fileName(input).map { "Editing \($0)" } ?? "Editing"
+        case "apply_patch":
+            let files = patchFiles(input)
+            return switch files.count {
+            case 0: "Editing"
+            case 1: "Editing \((files[0] as NSString).lastPathComponent)"
+            default: "Editing \(files.count) files"
+            }
         case "Read":
             return fileName(input).map { "Reading \($0)" } ?? "Reading"
-        case "Bash":
+        case "Bash", "exec_command", "shell", "local_shell", "container.exec":
             if let description = input?["description"] as? String, !description.isEmpty { return description }
-            return (input?["command"] as? String).map { "Running " + firstLine($0) } ?? "Running a command"
+            return shellCommand(input).map { "Running " + firstLine($0) } ?? "Running a command"
         case "Grep", "Glob":
             return "Searching"
-        case "WebFetch", "WebSearch":
+        case "WebFetch", "WebSearch", "web_search":
             return "Searching the web"
-        case "Task", "Agent":
+        case "Task", "Agent", "spawn_agent":
             return "Working with a subagent"
-        case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet":
+        case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "update_plan":
             return nil
         default:
             return tool.hasPrefix("mcp__") ? "Using \(tool.split(separator: "__").dropFirst().first ?? "a tool")" : "Using \(tool)"
@@ -571,12 +633,24 @@ final class ClaudeCodeMonitor {
     }
 
     /// Files it changed, and the task list when the model keeps it with
-    /// TodoWrite rather than the task tools.
+    /// TodoWrite rather than the task tools, or Codex's plan.
     private static func record(tool: String?, input: [String: Any]?, in session: inout Session) {
         switch tool {
         case "Edit", "MultiEdit", "Write", "NotebookEdit":
             if let path = input?["file_path"] as? String ?? input?["notebook_path"] as? String {
                 session.editedFiles.insert(path)
+            }
+        case "apply_patch":
+            for path in patchFiles(input) {
+                session.editedFiles.insert(path.hasPrefix("/") ? path : (session.folder as NSString).appendingPathComponent(path))
+            }
+        case "update_plan":
+            let steps = input?["plan"] as? [[String: Any]] ?? []
+            session.taskCount = steps.count
+            session.tasksDone = steps.filter { $0["status"] as? String == "completed" }.count
+            if let current = steps.first(where: { $0["status"] as? String == "in_progress" }),
+               let doing = current["step"] as? String {
+                session.activity = doing
             }
         case "TodoWrite":
             let todos = input?["todos"] as? [[String: Any]] ?? []
@@ -634,7 +708,14 @@ final class ClaudeCodeMonitor {
     static func approvalTitle(tool: String, input: [String: Any]) -> String {
         switch tool {
         case "Bash": "Allow Bash command?"
+        case "exec_command", "shell", "local_shell", "container.exec": "Allow command?"
         case "Edit", "MultiEdit", "Write", "NotebookEdit": "Allow edit to \(fileName(input) ?? "a file")?"
+        case "apply_patch":
+            switch patchFiles(input) {
+            case let files where files.count == 1: "Allow edit to \((files[0] as NSString).lastPathComponent)?"
+            case let files where files.count > 1: "Allow edits to \(files.count) files?"
+            default: "Allow edits?"
+            }
         case "Read": "Allow reading \(fileName(input) ?? "a file")?"
         case "WebFetch": "Allow fetching a page?"
         default:
@@ -644,10 +725,14 @@ final class ClaudeCodeMonitor {
         }
     }
 
-    /// The command, the file or the address, as Claude Code's own prompt
-    /// shows it.
+    /// The command, the file or the address, as the agent's own prompt
+    /// shows it. For a patch, the files it touches.
     static func approvalDetail(tool: String, input: [String: Any]) -> [String] {
-        if let command = input["command"] as? String {
+        if tool == "apply_patch" {
+            let files = patchFiles(input)
+            return files.count > 3 ? Array(files.prefix(2)) + ["and \(files.count - 2) more"] : files
+        }
+        if let command = shellCommand(input) {
             return ["$ " + command.replacingOccurrences(of: "\n", with: " ")]
         }
         if let path = input["file_path"] as? String ?? input["notebook_path"] as? String {
