@@ -1,3 +1,10 @@
+//
+//  AgentBridge.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import Foundation
 
 /// A small HTTP server on a Unix socket, which the hook scripts MacCove

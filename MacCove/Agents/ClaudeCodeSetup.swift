@@ -1,3 +1,10 @@
+//
+//  ClaudeCodeSetup.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import AppKit
 
 /// Adds MacCove's hook to Claude Code's user settings, or takes it out.

@@ -1,3 +1,10 @@
+//
+//  main.swift
+//  MacCoveHelper
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import Foundation
 
 /// MacCoveHelper runs as root. launchd starts it on demand when MacCove

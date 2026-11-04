@@ -1,3 +1,10 @@
+//
+//  TerminalViews.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import SwiftUI
 
 /// The design's prompt, `>_`, drawn in a 24pt box. The island's own,

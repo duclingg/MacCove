@@ -1,3 +1,10 @@
+//
+//  AppMenuExtent.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import AppKit
 import ApplicationServices
 import os

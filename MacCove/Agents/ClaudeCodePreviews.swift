@@ -1,3 +1,10 @@
+//
+//  ClaudeCodePreviews.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 #if DEBUG
 import SwiftUI
 

@@ -1,3 +1,10 @@
+//
+//  ClipboardViews.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/3/26.
+//
+
 import SwiftUI
 
 /// The design's clipboard, a board with its clip, drawn in a 24pt box.

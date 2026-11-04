@@ -1,3 +1,10 @@
+//
+//  GitHubSetup.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/3/26.
+//
+
 import AppKit
 import Security
 

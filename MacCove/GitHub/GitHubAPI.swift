@@ -1,3 +1,10 @@
+//
+//  GitHubAPI.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/3/26.
+//
+
 import Foundation
 
 /// A pull request as the notch shows it: yours, with its checks, or one

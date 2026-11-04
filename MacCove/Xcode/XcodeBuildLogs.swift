@@ -1,3 +1,10 @@
+//
+//  XcodeBuildLogs.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import Foundation
 
 /// An error from a build or a failed test, as Xcode's issue navigator

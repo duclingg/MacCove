@@ -1,3 +1,10 @@
+//
+//  CalendarMenu.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/3/26.
+//
+
 import SwiftUI
 
 /// Calendar Events in the menu bar: turning it on asks for Calendar,

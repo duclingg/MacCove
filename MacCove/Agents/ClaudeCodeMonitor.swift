@@ -1,3 +1,10 @@
+//
+//  ClaudeCodeMonitor.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import AppKit
 
 /// Claude Code sessions, as the island shows them: working, waiting for

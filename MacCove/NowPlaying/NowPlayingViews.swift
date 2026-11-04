@@ -1,3 +1,10 @@
+//
+//  NowPlayingViews.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import SwiftUI
 
 /// Artwork in the left wing; in the right, a level meter, the AirPlay

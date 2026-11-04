@@ -1,3 +1,10 @@
+//
+//  GitHubMonitor.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/3/26.
+//
+
 import AppKit
 
 /// Your pull requests and review requests on GitHub, as the notch shows

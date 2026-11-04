@@ -1,5 +1,5 @@
 //
-//  AppDelegate.swift
+//  MacCoveApp.swift
 //  MacCove
 //
 //  Created by Justin Hoang on 11/2/26.

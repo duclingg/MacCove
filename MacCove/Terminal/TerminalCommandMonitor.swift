@@ -1,3 +1,10 @@
+//
+//  TerminalCommandMonitor.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import AppKit
 
 /// Terminal commands that take a while, as the island shows them: running,

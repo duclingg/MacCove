@@ -1,3 +1,10 @@
+//
+//  CalendarViews.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/3/26.
+//
+
 import SwiftUI
 
 /// Birthdays in pink, everything else in its calendar's colour.

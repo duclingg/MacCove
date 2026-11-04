@@ -1,3 +1,10 @@
+//
+//  CalendarPreviews.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/3/26.
+//
+
 #if DEBUG
 import SwiftUI
 

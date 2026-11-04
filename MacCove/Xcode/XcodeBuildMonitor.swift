@@ -1,3 +1,10 @@
+//
+//  XcodeBuildMonitor.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import AppKit
 
 /// What Xcode is doing, as the island shows it: a build, a test run or the

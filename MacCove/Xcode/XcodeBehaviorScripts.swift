@@ -1,3 +1,10 @@
+//
+//  XcodeBehaviorScripts.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import AppKit
 
 /// The scripts Xcode's Behaviors run as a build or test run starts,

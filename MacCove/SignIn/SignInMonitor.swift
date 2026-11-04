@@ -1,3 +1,10 @@
+//
+//  SignInMonitor.swift
+//  MacCove
+//
+//  Created by Justin Hoang on 11/2/26.
+//
+
 import Foundation
 
 /// The lock screen, as the island shows it: Touch ID while locked, then
