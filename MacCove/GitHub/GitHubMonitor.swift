@@ -201,14 +201,14 @@ final class GitHubMonitor {
         }
     }
 
-    /// Your pull requests, for a push; the checks of those running, for
-    /// one finishing; and the open pull requests of their repositories and
-    /// the ones picked, for a new one.
+    /// Your pull requests, for a push; the checks on their latest commits,
+    /// for one finishing or being re-run from GitHub; and the open pull
+    /// requests of their repositories and the ones picked, for a new one.
     private var watchedPaths: [String] {
         guard let latest else { return [] }
         let mine = latest.authored.filter(isWatched)
         var paths = mine.map { "repos/\($0.repository)/pulls/\($0.number)" }
-        for pullRequest in mine where Self.phase(of: pullRequest) == .running {
+        for pullRequest in mine {
             if let sha = pullRequest.headSHA {
                 paths.append("repos/\(pullRequest.repository)/commits/\(sha)/check-runs?per_page=100")
             }
