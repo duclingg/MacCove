@@ -5,9 +5,14 @@ import AppKit
 /// for your review.
 ///
 /// Polls GitHub's GraphQL API every 30 seconds while checks are running
-/// and every minute otherwise; there's no webhook to wait on. Only things
-/// that change while MacCove runs show up: what was already failed, ready
-/// or waiting on you when it started is taken as seen.
+/// and every minute otherwise; there's no webhook to wait on. In between,
+/// every 10 seconds, it asks GitHub whether your pull requests, their
+/// checks or the open pull requests of their repositories have changed,
+/// which costs nothing while they haven't, and polls straight away when
+/// they have. After a push it polls every few seconds until the checks
+/// appear. Only things that change while MacCove runs show up: what was
+/// already failed, ready or waiting on you when it started is taken as
+/// seen.
 @Observable
 final class GitHubMonitor {
     enum Event {
@@ -61,6 +66,11 @@ final class GitHubMonitor {
     @ObservationIgnored var tokenProvider: () async -> String? = { await GitHubSetup.token() }
 
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var watchTask: Task<Void, Never>?
+    /// The last ETag of each REST resource watched for changes.
+    @ObservationIgnored private var etags: [String: String] = [:]
+    /// Each pull request's head commit, and when a new one was first seen.
+    @ObservationIgnored private var heads: [String: (sha: String, seenAt: Date)] = [:]
     @ObservationIgnored private var token: String?
     @ObservationIgnored private var latest: GitHubSnapshot?
     /// Each pull request's last key, to tell what changed between polls.
@@ -78,6 +88,12 @@ final class GitHubMonitor {
     private static let idleInterval: Duration = .seconds(60)
     /// After a network error, rather than hammering away.
     private static let retryInterval: Duration = .seconds(120)
+    /// Between asking whether anything changed.
+    private static let watchInterval: Duration = .seconds(10)
+    /// Right after a push, while GitHub queues the checks.
+    private static let expectingInterval: Duration = .seconds(5)
+    /// How long after a push to keep looking for its checks.
+    private static let expectingWindow: TimeInterval = 120
     private static let passedDuration: Duration = .seconds(6)
 
     // MARK: - Polling
@@ -85,12 +101,17 @@ final class GitHubMonitor {
     func start() {
         guard pollTask == nil else { return }
         poll(after: .zero)
+        watch()
     }
 
     /// Signed out: nothing more shows.
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        watchTask?.cancel()
+        watchTask = nil
+        etags = [:]
+        heads = [:]
         token = nil
         latest = nil
         login = nil
@@ -144,7 +165,8 @@ final class GitHubMonitor {
                 needsSignIn = false
                 apply(snapshot)
                 let isRunning = snapshot.authored.contains { Self.phase(of: $0) == .running }
-                return isRunning ? Self.activeInterval : Self.idleInterval
+                if isRunning { return Self.activeInterval }
+                return isExpectingChecks(in: snapshot) ? Self.expectingInterval : Self.idleInterval
             } catch GitHubAPI.Failure.unauthorized {
                 continue
             } catch {
@@ -153,6 +175,67 @@ final class GitHubMonitor {
         }
         needsSignIn = true
         return nil
+    }
+
+    /// A pull request of yours with a new commit, or new altogether, whose
+    /// checks haven't appeared yet.
+    private func isExpectingChecks(in snapshot: GitHubSnapshot) -> Bool {
+        snapshot.authored.filter(isWatched).contains { pullRequest in
+            guard pullRequest.checks.isEmpty, let head = heads[pullRequest.id] else { return false }
+            return Date.now.timeIntervalSince(head.seenAt) < Self.expectingWindow
+        }
+    }
+
+    // MARK: - Watching for changes
+
+    private func watch() {
+        guard watchTask == nil else { return }
+        watchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.watchInterval)
+                guard !Task.isCancelled, let self else { return }
+                if await self.hasChanged(), !Task.isCancelled {
+                    self.poll(after: .zero)
+                }
+            }
+        }
+    }
+
+    /// Your pull requests, for a push; the checks of those running, for
+    /// one finishing; and the open pull requests of their repositories and
+    /// the ones picked, for a new one.
+    private var watchedPaths: [String] {
+        guard let latest else { return [] }
+        let mine = latest.authored.filter(isWatched)
+        var paths = mine.map { "repos/\($0.repository)/pulls/\($0.number)" }
+        for pullRequest in mine where Self.phase(of: pullRequest) == .running {
+            if let sha = pullRequest.headSHA {
+                paths.append("repos/\(pullRequest.repository)/commits/\(sha)/check-runs?per_page=100")
+            }
+        }
+        let repositories = Set(mine.map(\.repository)).union(GitHubSetup.repositories)
+        paths += repositories.sorted().map { "repos/\($0)/pulls?state=open&sort=created&direction=desc&per_page=1" }
+        return paths
+    }
+
+    /// Whether anything watched has changed since it was last asked about.
+    /// The first answer for each only sets its ETag. Errors are left for
+    /// the next poll to deal with.
+    private func hasChanged() async -> Bool {
+        guard !needsSignIn, let token else { return false }
+        let api = GitHubAPI(token: token)
+        let paths = watchedPaths
+        var hasChanged = false
+        for path in paths {
+            guard !Task.isCancelled else { return false }
+            guard let tag = try? await api.changeTag(of: path, since: etags[path]) else { continue }
+            if etags[path] != nil {
+                hasChanged = true
+            }
+            etags[path] = tag
+        }
+        etags = etags.filter { paths.contains($0.key) }
+        return hasChanged
     }
 
     /// Kept between polls, so `gh` isn't run every minute.
@@ -187,6 +270,17 @@ final class GitHubMonitor {
     private func apply(_ snapshot: GitHubSnapshot) {
         latest = snapshot
         login = snapshot.login
+        // New commits since MacCove started are expecting checks.
+        var heads: [String: (sha: String, seenAt: Date)] = [:]
+        for pullRequest in snapshot.authored {
+            guard let sha = pullRequest.headSHA else { continue }
+            if let known = self.heads[pullRequest.id], known.sha == sha {
+                heads[pullRequest.id] = known
+            } else {
+                heads[pullRequest.id] = (sha, hasBaseline ? .now : .distantPast)
+            }
+        }
+        self.heads = heads
         var seen: Set<String> = []
         for activity in activities(in: snapshot) {
             let key = activity.key

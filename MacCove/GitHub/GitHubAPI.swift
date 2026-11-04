@@ -119,6 +119,29 @@ nonisolated struct GitHubAPI: Sendable {
             """, variables: variables)
     }
 
+    /// Asks whether a REST resource, such as "repos/owner/name/pulls/6",
+    /// has changed since `etag`. Returns its new ETag if it has, `nil` if
+    /// not. GitHub doesn't count an unchanged answer (a 304) against the
+    /// rate limit, so this can run every few seconds.
+    func changeTag(of path: String, since etag: String?) async throws -> String? {
+        var request = request(URL(string: "https://api.github.com/" + path)!)
+        if let etag {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        let (_, response) = try await Self.uncachedSession.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode != 304 else { return nil }
+        try Self.check(response)
+        return http.value(forHTTPHeaderField: "ETag")
+    }
+
+    /// Without a local cache, which would answer a 304 with a stale 200.
+    private static let uncachedSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
+
     /// Restarts only the jobs that failed in an Actions run.
     func rerunFailedJobs(repository: String, runID: Int) async throws {
         let url = URL(string: "https://api.github.com/repos/\(repository)/actions/runs/\(runID)/rerun-failed-jobs")!
