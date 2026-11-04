@@ -934,12 +934,12 @@ final class NotchViewModel {
         }
     }
 
-    /// Time to leave opens by itself, as a failure does. The rest just
-    /// shows.
+    /// Time to leave, and a meeting starting, open by themselves, as a
+    /// failure does. The rest just shows.
     private func calendarEvent(_ event: CalendarMonitor.Event) {
         switch event {
         case .started: activityStarted(.calendar)
-        case .timeToLeave: activityFailed(.calendar)
+        case .needsYou: activityFailed(.calendar)
         case .ended: activityEnded(.calendar)
         }
     }
