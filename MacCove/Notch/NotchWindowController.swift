@@ -64,7 +64,11 @@ final class NotchWindowController {
     private static let menuMeasurementDelays: [Duration] = [.milliseconds(150), .milliseconds(500), .seconds(1.5)]
     private static let log = Logger(subsystem: "com.justinhoang.MacCove", category: "AppMenus")
     /// How close to the notch a file drag comes before the pill says Drop.
-    private static let dropApproach: CGFloat = 80
+    private static let dropApproach: CGFloat = 120
+    /// How far below and beside the pill a file drag opens the notch. Held
+    /// at the top edge, a drag opens Mission Control instead, so the drop
+    /// zones have to be out before the cursor gets there.
+    private static let dropOpenReach = CGSize(width: 40, height: 60)
 
     init(viewModel: NotchViewModel) {
         self.viewModel = viewModel
@@ -344,13 +348,18 @@ final class NotchWindowController {
 
         // A file drag on its way: the notch takes it only while it's over
         // the notch, so a drop anywhere else still lands where it's let go.
-        // Hovering waits until the drag is over.
+        // It opens a little before the drag reaches it, then stays open
+        // while the drag is anywhere over it. Hovering waits until the drag
+        // is over.
         if isDraggingFiles, NSEvent.pressedMouseButtons & 1 == 0 {
             trackFileDrag(.leftMouseUp)
         }
         if isDraggingFiles, viewModel.acceptsFileDrops {
             let island = islandFrame(on: screen)
-            let isOver = island.contains(mouse)
+            let isOpen = viewModel.shelf.dragPhase == .over && viewModel.state == .expanded
+            let isOver = isOpen
+                ? island.contains(mouse)
+                : island.insetBy(dx: -Self.dropOpenReach.width, dy: -Self.dropOpenReach.height).contains(mouse)
             let isNear = isOver || island.insetBy(dx: -Self.dropApproach, dy: -Self.dropApproach).contains(mouse)
             viewModel.fileDragMoved(near: isNear, over: isOver)
             setReceivesMouse(isOver)
