@@ -60,8 +60,18 @@ struct SettingsView: View {
 }
 
 extension View {
+    /// Every toggle inside as a switch, green when it's on. The tint goes on
+    /// each switch rather than the view, so buttons and pickers alongside
+    /// keep their usual colours.
     func settingsSwitch() -> some View {
-        toggleStyle(.switch)
+        toggleStyle(GreenSwitchToggleStyle())
+    }
+}
+
+private struct GreenSwitchToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(configuration)
+            .toggleStyle(.switch)
             .tint(.green)
     }
 }
