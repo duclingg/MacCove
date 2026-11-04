@@ -94,6 +94,9 @@ struct IslandView: View {
                 case .clipboard?:
                     ClipboardCompactView(clipboard: viewModel.clipboard, notchSize: notch)
                         .transition(.islandContent)
+                case .calendar?:
+                    CalendarCompactView(calendar: viewModel.calendar, notchSize: notch)
+                        .transition(.islandContent)
                 case .nowPlaying?:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
@@ -106,8 +109,8 @@ struct IslandView: View {
                 }
             case .expanded:
                 // Sign-in never opens, so anything but the player, a build, a
-                // command, an agent, GitHub or the clipboard here is the
-                // battery's.
+                // command, an agent, GitHub, the clipboard or the calendar
+                // here is the battery's.
                 switch viewModel.primaryActivity {
                 case .nowPlaying?:
                     NowPlayingExpandedView(
@@ -131,6 +134,9 @@ struct IslandView: View {
                         .transition(.islandContent)
                 case .clipboard?:
                     ClipboardExpandedView(clipboard: viewModel.clipboard, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case .calendar?:
+                    CalendarExpandedView(calendar: viewModel.calendar, notchHeight: notch.height)
                         .transition(.islandContent)
                 default:
                     BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
@@ -234,6 +240,8 @@ private struct IslandBubbleView: View {
             GitHubMinimalView(github: viewModel.github, notchSize: viewModel.notchSize)
         case .clipboard:
             ClipboardMinimalView(notchSize: viewModel.notchSize)
+        case .calendar:
+            CalendarMinimalView(calendar: viewModel.calendar, notchSize: viewModel.notchSize)
         case .signIn, .charging, .lowBattery:
             // A prompt always leads, and a battery alert shows alone.
             EmptyView()

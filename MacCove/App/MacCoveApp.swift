@@ -24,6 +24,7 @@ struct MacCoveApp: App {
                 launchAtLogin.refresh()
                 hasAccessibility = AppMenuExtent.isAllowed
                 isClipboardRestricted = ClipboardMonitor.isAccessRestricted
+                appDelegate.calendar.refreshPermissions()
             }
             Button("Set Up Xcode Builds…") {
                 XcodeBehaviorScripts.showSetup()
@@ -74,6 +75,10 @@ struct MacCoveApp: App {
                 }
             }
             Divider()
+            CalendarMenu(calendar: appDelegate.calendar) {
+                appDelegate.showTodayEvents()
+            }
+            Divider()
             Button("Quit MacCove") {
                 NSApp.terminate(nil)
             }
@@ -90,6 +95,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clipboard: ClipboardMonitor?
     private var github: GitHubMonitor?
     private var agentBridge: AgentBridge?
+    /// Made when the menu bar or launch first needs it, whichever is
+    /// first, so the menu can show its calendars.
+    private(set) lazy var calendar = CalendarMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let music = MusicScripting()
@@ -117,7 +125,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             terminal: terminal,
             claude: claude,
             github: github,
-            clipboard: clipboard
+            clipboard: clipboard,
+            calendar: calendar
         )
         self.viewModel = viewModel
         notchController = NotchWindowController(viewModel: viewModel)
@@ -130,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if GitHubSetup.source != nil {
             github.start()
         }
+        calendar.start()
 
         // Hook events from Claude Code, by the agent they're for.
         let bridge = AgentBridge { [weak claude] request in
@@ -164,6 +174,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showClipboardHistory() {
         viewModel?.showClipboardHistory()
+    }
+
+    func showTodayEvents() {
+        viewModel?.showTodayEvents()
     }
 
     func showGitHubSetup() {
