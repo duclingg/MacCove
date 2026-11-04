@@ -101,7 +101,7 @@ struct DeviceBatteryCompactView: View {
 
         HStack(spacing: 0) {
             DeviceGlyph(
-                symbol: device?.systemImage ?? batteries.allDevices.first?.systemImage ?? "computermouse.fill",
+                symbol: device?.systemImage ?? batteries.devices.first?.systemImage ?? "computermouse.fill",
                 color: device.map { BatteryStyle.device($0).tint } ?? .white,
                 size: layout.artSize
             )
@@ -114,7 +114,7 @@ struct DeviceBatteryCompactView: View {
                     BatteryGlyph(level: Double(device.level) / 100, style: style, height: Self.glyphHeight(notch: notchSize))
                 }
             } else {
-                Text("\(batteries.allDevices.count)")
+                Text("\(batteries.devices.count)")
             }
         }
         .font(.system(size: 14, weight: .medium))
@@ -133,7 +133,7 @@ struct DeviceBatteryCompactView: View {
             guard let device = batteries.featured else { return "Device batteries" }
             return spokenLevel(device)
         case .list?:
-            let count = batteries.allDevices.count
+            let count = batteries.devices.count
             return count == 1 ? "1 device connected" : "\(count) devices connected"
         case nil:
             return "Device batteries"
@@ -152,7 +152,7 @@ struct DeviceBatteryMinimalView: View {
         let device = batteries.featured
 
         DeviceGlyph(
-            symbol: device?.systemImage ?? batteries.allDevices.first?.systemImage ?? "computermouse.fill",
+            symbol: device?.systemImage ?? batteries.devices.first?.systemImage ?? "computermouse.fill",
             color: device.map { BatteryStyle.device($0).tint } ?? .white,
             size: layout.artSize
         )
@@ -184,7 +184,7 @@ struct DeviceBatteryExpandedView: View {
         case .low?:
             height += chipsGap + chipHeight
         case .connected?, .charging?, .list?:
-            let rows = min(batteries.allDevices.count, maxRows)
+            let rows = min(batteries.devices.count, maxRows)
             if rows > 0 {
                 height += listGap + listPadding * 2 + rowHeight * CGFloat(rows)
             }
@@ -270,7 +270,7 @@ struct DeviceBatteryExpandedView: View {
 
     @ViewBuilder
     private var list: some View {
-        let devices = batteries.allDevices
+        let devices = batteries.devices
         header(
             symbol: batteries.featured?.systemImage ?? devices.first?.systemImage ?? "computermouse.fill",
             tint: .white,

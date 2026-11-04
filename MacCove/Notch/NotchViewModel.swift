@@ -44,8 +44,6 @@ enum IslandActivity: Hashable {
     /// A mouse, keyboard or controller running low, connecting or
     /// charging, or every device's level.
     case deviceBatteries
-    /// AirPods or other headphones connecting, for a moment.
-    case airPods
     /// Files dropped on the notch, or a file drag on its way to it.
     case shelf
     case nowPlaying
@@ -55,7 +53,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .airPods, .shelf, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .shelf, .nowPlaying: .zero
         }
     }
 }
@@ -115,7 +113,6 @@ final class NotchViewModel {
     let calendar: CalendarMonitor
     let reminders: RemindersMonitor
     let deviceBatteries: DeviceBatteryMonitor
-    let airPods: AirPodsMonitor
     let shelf: FileShelf
 
     var notchSize = CGSize(width: 186, height: 37)
@@ -201,7 +198,6 @@ final class NotchViewModel {
         calendar: CalendarMonitor,
         reminders: RemindersMonitor,
         deviceBatteries: DeviceBatteryMonitor,
-        airPods: AirPodsMonitor,
         shelf: FileShelf
     ) {
         self.nowPlaying = nowPlaying
@@ -216,7 +212,6 @@ final class NotchViewModel {
         self.calendar = calendar
         self.reminders = reminders
         self.deviceBatteries = deviceBatteries
-        self.airPods = airPods
         self.shelf = shelf
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
@@ -277,13 +272,6 @@ final class NotchViewModel {
         deviceBatteries.isInUse = { [weak self] in
             guard let self else { return false }
             return self.isHovering || self.presentation == .expanded
-        }
-        airPods.onEvent = { [weak self] event in
-            self?.airPodsEvent(event)
-        }
-        airPods.isInUse = { [weak self] in
-            guard let self else { return false }
-            return self.hovered == .airPods || (self.presentation == .expanded && self.expandedActivity == .airPods)
         }
         shelf.onEvent = { [weak self] event in
             self?.shelfEvent(event)
@@ -357,10 +345,6 @@ final class NotchViewModel {
         var running: [IslandActivity] = []
         if claude.needsAnswer {
             running.append(.claudeCode)
-        }
-        // AirPods connecting lead for their moment, as on the iPhone.
-        if isShowingAll, airPods.isShown {
-            running.append(.airPods)
         }
         if isShowingAll, clipboard.shown != nil {
             running.append(.clipboard)
@@ -512,7 +496,6 @@ final class NotchViewModel {
             case .calendar?: CalendarExpandedView.bodyHeight(for: calendar)
             case .reminders?: RemindersExpandedView.bodyHeight(for: reminders)
             case .deviceBatteries?: DeviceBatteryExpandedView.bodyHeight(for: deviceBatteries)
-            case .airPods?: AirPodsExpandedView.bodyHeight(for: airPods)
             case .shelf?: ShelfExpandedView.bodyHeight(for: shelf)
             default: BatteryExpandedView.bodyHeight
             }
@@ -760,7 +743,7 @@ final class NotchViewModel {
         case .signIn, .charging, .lowBattery: false
         case .claudeCode: !claude.needsAnswer
         case .shelf: shelf.dragPhase == nil
-        case .xcode, .terminal, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .airPods, .nowPlaying: true
+        case .xcode, .terminal, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .nowPlaying: true
         }
     }
 
@@ -782,7 +765,7 @@ final class NotchViewModel {
         case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
         case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
         case .reminders: return frontID == RemindersMonitor.appBundleIdentifier
-        case .github, .clipboard, .deviceBatteries, .airPods, .shelf, .signIn, .charging, .lowBattery: return false
+        case .github, .clipboard, .deviceBatteries, .shelf, .signIn, .charging, .lowBattery: return false
         }
     }
 
@@ -825,7 +808,6 @@ final class NotchViewModel {
             calendar.leaveIfDue(after: .seconds(1.2))
             reminders.leaveIfDue(after: .seconds(1.2))
             deviceBatteries.leaveIfDue(after: .seconds(1.2))
-            airPods.leaveIfDue(after: .seconds(1.2))
         }
     }
 
@@ -996,14 +978,6 @@ final class NotchViewModel {
         switch event {
         case .started: activityStarted(.deviceBatteries)
         case .ended: activityEnded(.deviceBatteries)
-        }
-    }
-
-    /// AirPods connecting show for a moment, then leave.
-    private func airPodsEvent(_ event: AirPodsMonitor.Event) {
-        switch event {
-        case .started: activityStarted(.airPods)
-        case .ended: activityEnded(.airPods)
         }
     }
 
@@ -1250,7 +1224,6 @@ final class NotchViewModel {
             self.calendar.leaveIfDue(after: .seconds(1.2))
             self.reminders.leaveIfDue(after: .seconds(1.2))
             self.deviceBatteries.leaveIfDue(after: .seconds(1.2))
-            self.airPods.leaveIfDue(after: .seconds(1.2))
         }
     }
 }

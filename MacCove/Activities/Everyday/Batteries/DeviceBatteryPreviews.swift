@@ -14,7 +14,6 @@ private let mouse = PeripheralDevice(id: "mouse", name: "Magic Mouse", kind: .mo
 private let chargingMouse = PeripheralDevice(id: "mouse", name: "Magic Mouse", kind: .mouse, level: 12, isCharging: true)
 private let keyboard = PeripheralDevice(id: "keyboard", name: "Magic Keyboard", kind: .keyboard, level: 64, isCharging: false)
 private let controller = PeripheralDevice(id: "controller", name: "Wireless Controller", kind: .controller, level: 35, isCharging: false)
-private let airPodsMax = PeripheralDevice(id: "airpods", name: "AirPods Max", kind: .headphones(.airPodsMax), level: 80, isCharging: false)
 
 private func compact(_ batteries: DeviceBatteryMonitor) -> some View {
     IslandPreview(
@@ -54,7 +53,6 @@ private func expanded(_ batteries: DeviceBatteryMonitor) -> some View {
 #Preview("Every connected device") {
     expanded(.preview(
         devices: [mouse, keyboard, controller],
-        headphones: [airPodsMax],
         moment: (.connected, keyboard.id)
     ))
 }

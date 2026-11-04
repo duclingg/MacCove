@@ -10,15 +10,13 @@ import GameController
 import IOKit
 
 /// Something connected to the Mac that runs on a battery: a mouse,
-/// keyboard, trackpad, game controller or headphones.
+/// keyboard, trackpad or game controller.
 struct PeripheralDevice: Identifiable, Equatable {
     enum Kind: Equatable {
         case mouse
         case keyboard
         case trackpad
         case controller
-        /// AirPods and other headphones, from `AirPodsMonitor`.
-        case headphones(AudioRoute.Device)
         case other
     }
 
@@ -37,7 +35,6 @@ struct PeripheralDevice: Identifiable, Equatable {
         case .keyboard: "keyboard.fill"
         case .trackpad: "rectangle.and.hand.point.up.left.fill"
         case .controller: "gamecontroller.fill"
-        case .headphones(let device): AudioRoute(destination: name, device: device).systemImage
         case .other: "dot.radiowaves.right"
         }
     }
@@ -93,9 +90,6 @@ final class DeviceBatteryMonitor {
     private(set) var isEnabled = UserDefaults.standard.object(forKey: DeviceBatteryMonitor.enabledKey) as? Bool ?? true
     /// Mice, keyboards, trackpads and controllers, by name.
     private(set) var devices: [PeripheralDevice] = []
-    /// Headphones, given by `AirPodsMonitor`: listed, but warned about
-    /// there.
-    private(set) var headphones: [PeripheralDevice] = []
     /// Low and not yet dismissed, the first warned first.
     private(set) var lowDeviceIDs: [String] = []
     /// The device connecting or charging, while it shows.
@@ -149,12 +143,7 @@ final class DeviceBatteryMonitor {
     var featured: PeripheralDevice? {
         if let low = lowDevices.min(by: { $0.level < $1.level }) { return low }
         guard let moment else { return nil }
-        return allDevices.first { $0.id == moment.id }
-    }
-
-    /// Everything with a battery, headphones too, by name.
-    var allDevices: [PeripheralDevice] {
-        (devices + headphones).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return devices.first { $0.id == moment.id }
     }
 
     static func isLow(_ device: PeripheralDevice) -> Bool {
@@ -213,12 +202,6 @@ final class DeviceBatteryMonitor {
         isListOpen = false
         leaving?.cancel()
         update()
-    }
-
-    /// From `AirPodsMonitor`, as headphones connect and their levels change.
-    func setHeadphones(_ headphones: [PeripheralDevice]) {
-        guard headphones != self.headphones else { return }
-        self.headphones = headphones
     }
 
     // MARK: - Watching for devices
@@ -326,7 +309,7 @@ final class DeviceBatteryMonitor {
 
         // Gone: nothing left to warn about.
         lowDeviceIDs.removeAll { id in !found.contains { $0.id == id } }
-        if let moment, !allDevices.contains(where: { $0.id == moment.id }) {
+        if let moment, !devices.contains(where: { $0.id == moment.id }) {
             endMoment()
         }
         update()
@@ -483,14 +466,12 @@ extension DeviceBatteryMonitor {
     /// Shows what's given and stays that way, for SwiftUI previews.
     static func preview(
         devices: [PeripheralDevice],
-        headphones: [PeripheralDevice] = [],
         low: [String] = [],
         moment: (phase: Phase, id: String)? = nil,
         isListOpen: Bool = false
     ) -> DeviceBatteryMonitor {
         let monitor = DeviceBatteryMonitor()
         monitor.devices = devices
-        monitor.headphones = headphones
         monitor.lowDeviceIDs = low
         monitor.moment = moment
         monitor.isListOpen = isListOpen

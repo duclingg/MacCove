@@ -16,7 +16,6 @@ struct ActivitiesSettingsView: View {
     @Environment(CalendarMonitor.self) private var calendar
     @Environment(RemindersMonitor.self) private var reminders
     @Environment(DeviceBatteryMonitor.self) private var deviceBatteries
-    @Environment(AirPodsMonitor.self) private var airPods
     @Environment(FileShelf.self) private var shelf
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
     @Environment(NotchCommands.self) private var notch
@@ -34,15 +33,6 @@ struct ActivitiesSettingsView: View {
                     get: { battery.isEnabled },
                     set: { battery.setEnabled($0) }
                 ))
-                activityToggle("AirPods", detail: airPodsDetail, isOn: Binding(
-                    get: { airPods.isEnabled },
-                    set: { airPods.setEnabled($0) }
-                ))
-                if airPods.isEnabled, airPods.access == .denied {
-                    allowRow("MacCove can’t see your AirPods connect", detail: "Turn on MacCove in Privacy & Security › Bluetooth") {
-                        AirPodsMonitor.openAccessSettings()
-                    }
-                }
                 activityToggle("Touch ID at the lock screen", detail: "Shows as you unlock", isOn: Binding(
                     get: { signIn.isEnabled },
                     set: { signIn.setEnabled($0) }
@@ -119,8 +109,8 @@ struct ActivitiesSettingsView: View {
                     get: { deviceBatteries.isEnabled },
                     set: { deviceBatteries.setEnabled($0) }
                 ))
-                if deviceBatteries.isEnabled, !deviceBatteries.allDevices.isEmpty {
-                    let count = deviceBatteries.allDevices.count
+                if deviceBatteries.isEnabled, !deviceBatteries.devices.isEmpty {
+                    let count = deviceBatteries.devices.count
                     LabeledContent {
                         Button("Show Devices") {
                             notch.showDeviceBatteries()
@@ -140,7 +130,6 @@ struct ActivitiesSettingsView: View {
         .onAppear {
             calendar.refreshPermissions()
             reminders.refreshPermissions()
-            airPods.refreshPermissions()
             isClipboardRestricted = ClipboardMonitor.isAccessRestricted
         }
     }
@@ -176,15 +165,6 @@ struct ActivitiesSettingsView: View {
     private var batteryDetail: String {
         let levels = BatteryMonitor.lowBatteryThresholds.map { "\($0)%" }
         return "Warns at \(levels.formatted(.list(type: .and))), and shows when it’s charging"
-    }
-
-    private var airPodsDetail: String {
-        guard airPods.isEnabled else { return "Shows as they connect, with their battery" }
-        switch airPods.access {
-        case .notDetermined: return "Asks for access to Bluetooth"
-        case .denied: return "Needs access to Bluetooth"
-        case .granted: return "Shows as they connect, with their battery"
-        }
     }
 
     private var deviceBatteriesDetail: String {
@@ -327,7 +307,6 @@ struct ActivitiesSettingsView: View {
         .environment(CalendarMonitor())
         .environment(RemindersMonitor())
         .environment(DeviceBatteryMonitor())
-        .environment(AirPodsMonitor())
         .environment(FileShelf(loadsSaved: false))
         .environment(NotchCommands())
 }

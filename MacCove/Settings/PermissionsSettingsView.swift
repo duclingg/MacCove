@@ -7,7 +7,6 @@
 
 import AppKit
 import Contacts
-import CoreBluetooth
 import CoreLocation
 import EventKit
 import ServiceManagement
@@ -141,7 +140,7 @@ private struct Permission: Identifiable {
     static func current() async -> [Permission] {
         var permissions = [accessibility()]
         permissions += await automation()
-        permissions += [calendar(), reminders(), bluetooth(), location(), contacts(), pasteboard()]
+        permissions += [calendar(), reminders(), location(), contacts(), pasteboard()]
         if let helper = lowPowerModeHelper() {
             permissions.append(helper)
         }
@@ -264,27 +263,6 @@ private struct Permission: Identifiable {
                 detail: "Reminders needs it. Turn on MacCove under Reminders, with full access."
             ) {
                 RemindersMonitor.openAccessSettings()
-            } : nil
-        )
-    }
-
-    private static func bluetooth() -> Permission {
-        let status: Status = switch CBManager.authorization {
-        case .allowedAlways: .allowed
-        case .notDetermined: .notAsked
-        default: .denied
-        }
-        return Permission(
-            id: "bluetooth",
-            title: "Bluetooth",
-            detail: "For AirPods",
-            icon: PermissionIcon(symbol: "airpods", color: .blue),
-            status: status,
-            fix: status == .denied ? Fix(
-                title: "Bluetooth access was denied",
-                detail: "AirPods needs it to see them connect. Turn on MacCove under Bluetooth."
-            ) {
-                AirPodsMonitor.openAccessSettings()
             } : nil
         )
     }
