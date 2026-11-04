@@ -12,13 +12,6 @@ import EventKit
 import ServiceManagement
 import SwiftUI
 
-/// What macOS has let MacCove do, and how to fix the rest. MacCove can't
-/// change any of it itself, so anything that needs you opens the right
-/// part of System Settings. Read again whenever MacCove comes back to the
-/// front, since that's where you'd have been.
-///
-/// Local Network, for AirPlay speakers, isn't here: macOS doesn't let an
-/// app read it, short of searching the network, which can ask for it.
 struct PermissionsSettingsView: View {
     // MARK: States
     @State private var permissions: [Permission] = []

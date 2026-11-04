@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var clipboard = ClipboardMonitor()
     private(set) lazy var github = GitHubMonitor()
     private(set) lazy var calendar = CalendarMonitor()
+    private(set) lazy var updates = UpdateChecker()
     
     /// Opens Settings, given by `MacCoveApp`, which can open windows.
     var showSettings: (() -> Void)?
@@ -71,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             github.start()
         }
         calendar.start()
+        updates.startAutomaticChecks()
         
         // Hook events from Claude Code, by the agent they're for.
         let bridge = AgentBridge { [weak claude] request in
