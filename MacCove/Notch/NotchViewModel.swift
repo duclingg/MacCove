@@ -25,6 +25,8 @@ enum IslandActivity: Hashable {
     case terminal
     /// A Claude Code session: working, waiting for approval, finished.
     case claudeCode
+    /// A pull request's checks, or a review someone asked you for.
+    case github
     /// "Copied" for a moment, or the last few copies.
     case clipboard
     case nowPlaying
@@ -34,7 +36,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .clipboard, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .nowPlaying: .zero
         }
     }
 }
@@ -53,6 +55,9 @@ struct IslandBubble: Equatable, Identifiable {
         let activity: IslandActivity
         /// In the same space as the bubble's frame.
         let frame: CGRect
+        /// The extras, stacked as mini icons in place of the first of them,
+        /// which a click opens. Empty for an activity's own.
+        var overflow: [IslandActivity] = []
     }
 
     let side: Side
@@ -86,6 +91,7 @@ final class NotchViewModel {
     let xcode: XcodeBuildMonitor
     let terminal: TerminalCommandMonitor
     let claude: ClaudeCodeMonitor
+    let github: GitHubMonitor
     let clipboard: ClipboardMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
@@ -113,6 +119,10 @@ final class NotchViewModel {
     private var isSigningIn = false
     /// The charging pill or the low battery alert, until it times out.
     private var batteryAlert: IslandActivity?
+    /// Opened from the mini icons: stays in the first bubble once it
+    /// closes, so the next click on them reaches the one after it. Something
+    /// new starting puts everything back in order.
+    private var promotedActivity: IslandActivity?
 
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
@@ -129,6 +139,7 @@ final class NotchViewModel {
         xcode: XcodeBuildMonitor,
         terminal: TerminalCommandMonitor,
         claude: ClaudeCodeMonitor,
+        github: GitHubMonitor,
         clipboard: ClipboardMonitor
     ) {
         self.nowPlaying = nowPlaying
@@ -138,6 +149,7 @@ final class NotchViewModel {
         self.xcode = xcode
         self.terminal = terminal
         self.claude = claude
+        self.github = github
         self.clipboard = clipboard
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
@@ -162,6 +174,13 @@ final class NotchViewModel {
         claude.onEvent = { [weak self] event in
             self?.claudeEvent(event)
         }
+        github.onEvent = { [weak self] event in
+            self?.githubEvent(event)
+        }
+        github.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.isHovering || self.presentation == .expanded
+        }
         clipboard.onEvent = { [weak self] event in
             self?.clipboardEvent(event)
         }
@@ -173,11 +192,23 @@ final class NotchViewModel {
         }
     }
 
-    /// Most that run at once: one in the island and two in bubbles.
+    /// Most shown on their own: one in the island and two in bubbles. The
+    /// rest stack up as mini icons in the right bubble.
     static let maxActivities = 3
 
-    /// What's running, the island's first and the rest for the bubbles.
+    /// What's shown on its own, the island's first and the rest for the
+    /// bubbles.
     var activities: [IslandActivity] {
+        Array(runningActivities.prefix(Self.maxActivities))
+    }
+
+    /// Running past those, stacked as mini icons in the right bubble.
+    var overflowActivities: [IslandActivity] {
+        Array(runningActivities.dropFirst(Self.maxActivities))
+    }
+
+    /// Everything running, in order.
+    private var runningActivities: [IslandActivity] {
         // A full-screen app hides everything but the lock screen, unless the
         // island was brought back on purpose.
         let isShowingAll = !isFullScreenActive || isRevealedByHover
@@ -212,13 +243,20 @@ final class NotchViewModel {
         if isShowingAll, terminal.command != nil {
             running.append(.terminal)
         }
+        if isShowingAll, github.activity != nil {
+            running.append(.github)
+        }
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
+        }
+        if running.count > Self.maxActivities, let promotedActivity,
+           let index = running.firstIndex(of: promotedActivity), index > 1 {
+            running.insert(running.remove(at: index), at: 1)
         }
         if presentation == .expanded, let expandedActivity, let index = running.firstIndex(of: expandedActivity) {
             running.insert(running.remove(at: index), at: 0)
         }
-        return Array(running.prefix(Self.maxActivities))
+        return running
     }
 
     var primaryActivity: IslandActivity? {
@@ -308,6 +346,7 @@ final class NotchViewModel {
             case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
             case .claudeCode?: ClaudeCodeExpandedView.bodyHeight(for: claude.session)
+            case .github?: GitHubExpandedView.bodyHeight(for: github)
             case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
             default: BatteryExpandedView.bodyHeight
             }
@@ -320,16 +359,20 @@ final class NotchViewModel {
     /// there, and otherwise joins the second's bubble. When the menus fill
     /// both sides of the notch, there are no bubbles at all, so none covers
     /// a menu; the others keep running and come back once there's room.
-    /// Never beside the open island.
+    /// Never beside the open island. Any more than three stack up as mini
+    /// icons beside the second, always on the right; without room on the
+    /// left, the third joins the stack.
     var bubbles: [IslandBubble] {
         guard state == .compact, appMenus?.spillsPastCentre != true else { return [] }
         var trailing = Array(activities.dropFirst())
-        guard !trailing.isEmpty else { return [] }
+        guard let second = trailing.first else { return [] }
+        let overflow = overflowActivities
         if trailing.count > 1, hasRoomLeftOfIsland(for: bubbleWidth(for: [trailing[1]])) {
             let third = trailing.removeLast()
-            return [bubble(on: .trailing, for: trailing), bubble(on: .leading, for: [third])]
+            return [bubble(on: .trailing, for: [second], stack: overflow), bubble(on: .leading, for: [third])]
         }
-        return [bubble(on: .trailing, for: trailing)]
+        guard !overflow.isEmpty else { return [bubble(on: .trailing, for: trailing)] }
+        return [bubble(on: .trailing, for: [second], stack: Array(trailing.dropFirst()) + overflow)]
     }
 
     /// A lone Now Playing bubble has room for the audio device too.
@@ -347,8 +390,10 @@ final class NotchViewModel {
         }
     }
 
-    /// Hovering either glyph grows the whole bubble.
-    private func bubble(on side: IslandBubble.Side, for activities: [IslandActivity]) -> IslandBubble {
+    /// Hovering either glyph grows the whole bubble. A stack, even of one,
+    /// takes a glyph's place on the outside.
+    private func bubble(on side: IslandBubble.Side, for shown: [IslandActivity], stack: [IslandActivity] = []) -> IslandBubble {
+        let activities = shown + stack.prefix(1)
         let width = bubbleWidth(for: activities)
         let grow = hovered.map { activities.contains($0) } == true ? Self.bubbleHoverGrowth : 0
         let size = CGSize(width: width + grow, height: notchSize.height + grow)
@@ -362,7 +407,8 @@ final class NotchViewModel {
         let segments = ordered.enumerated().map { index, activity in
             IslandBubble.Segment(
                 activity: activity,
-                frame: CGRect(x: frame.minX + segmentWidth * CGFloat(index), y: 0, width: segmentWidth, height: frame.height)
+                frame: CGRect(x: frame.minX + segmentWidth * CGFloat(index), y: 0, width: segmentWidth, height: frame.height),
+                overflow: activity == stack.first ? stack : []
             )
         }
         return IslandBubble(side: side, frame: frame, segments: segments, isWide: isWideBubble(for: activities))
@@ -472,6 +518,10 @@ final class NotchViewModel {
     /// Opens the activity clicked: the island's own, or one from a bubble.
     func expand(_ activity: IslandActivity? = nil) {
         guard let activity = activity ?? primaryActivity, activity != .signIn else { return }
+        let isStacked = bubbles.flatMap(\.segments).contains { $0.activity == activity && !$0.overflow.isEmpty }
+        if isStacked || overflowActivities.contains(activity) {
+            promotedActivity = activity
+        }
         collapseTask?.cancel()
         alertTask?.cancel()
         expandedActivity = activity
@@ -495,6 +545,7 @@ final class NotchViewModel {
         } else if presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
             terminal.leaveIfDue(after: .seconds(1.2))
+            github.leaveIfDue(after: .seconds(1.2))
             clipboard.leaveIfDue(after: .seconds(1.2))
         }
     }
@@ -606,6 +657,16 @@ final class NotchViewModel {
         }
     }
 
+    /// A failed check opens by itself, as a failed build does. Passing,
+    /// ready to merge and review requests just show.
+    private func githubEvent(_ event: GitHubMonitor.Event) {
+        switch event {
+        case .started: activityStarted(.github)
+        case .failed: activityFailed(.github)
+        case .ended: activityEnded(.github)
+        }
+    }
+
     /// A permission request, question or plan opens the island and keeps
     /// it open until it's answered, here or in the terminal.
     private func claudeEvent(_ event: ClaudeCodeMonitor.Event) {
@@ -670,6 +731,7 @@ final class NotchViewModel {
     /// A failure left open gives way to whatever its activity starts next,
     /// unless the cursor is on it.
     private func activityStarted(_ activity: IslandActivity) {
+        promotedActivity = nil
         guard expandedActivity == activity else { return }
         failureCollapseTask?.cancel()
         if presentation == .expanded, !isHovering {
@@ -736,6 +798,7 @@ final class NotchViewModel {
             self.isRevealedByHover = false
             self.scheduleAlertDismissal(after: .seconds(1.2))
             self.terminal.leaveIfDue(after: .seconds(1.2))
+            self.github.leaveIfDue(after: .seconds(1.2))
             self.clipboard.leaveIfDue(after: .seconds(1.2))
         }
     }
