@@ -389,8 +389,6 @@ nonisolated private struct PullRequestNode: Decodable {
         let rebaseMergeAllowed: Bool?
     }
 
-    }
-
     nonisolated struct Review: Decodable {
         let state: String
     }
