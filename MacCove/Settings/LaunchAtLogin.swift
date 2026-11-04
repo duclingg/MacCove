@@ -9,9 +9,6 @@ import Foundation
 import OSLog
 import ServiceManagement
 
-/// Whether MacCove opens when you log in. A notch app is only useful while
-/// it's running, so it's turned on the first time MacCove launches and can
-/// be switched off from the menu bar item.
 @Observable
 final class LaunchAtLogin {
     private(set) var isEnabled = false
@@ -40,11 +37,8 @@ final class LaunchAtLogin {
         refresh()
     }
 
-    /// The user can also change this in System Settings › General › Login
-    /// Items, so it's re-read whenever the menu opens.
+    /// The user can also change this in System Settings › General › Login Items, so it's re-read whenever the menu opens.
     func refresh() {
-        // `.requiresApproval` means it's registered but waiting for the user
-        // to allow it in Login Items; show it as on.
         let status = SMAppService.mainApp.status
         isEnabled = status == .enabled || status == .requiresApproval
     }
