@@ -28,8 +28,7 @@ struct MacCoveApp: App {
     var body: some Scene {
         MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled", isInserted: .constant(!Self.isRunningForPreviews)) {
             Button("Settings", systemImage: "gear") {
-                NSApp.activate(ignoringOtherApps: true)
-                openWindow(id: "settings-window")
+                showSettings()
             }
             .onAppear {
                 hasAccessibility = AppMenuExtent.isAllowed
@@ -93,10 +92,26 @@ struct MacCoveApp: App {
             .keyboardShortcut("q")
         }
         
-        Window("Settings", id: "settings-window") {
+        Window("Settings", id: Self.settingsWindowID) {
             SettingsView()
                 .frame(width: 800, height: 600)
         }
         .windowResizability(.contentSize)
+    }
+
+    private static let settingsWindowID = "settings-window"
+
+    /// Opens Settings, or brings it back, in front of every app's windows.
+    /// MacCove has no Dock icon, so a window it opens stays behind the app
+    /// in front unless MacCove asks to come forward, and SwiftUI only makes
+    /// the window after `openWindow` returns.
+    private func showSettings() {
+        openWindow(id: Self.settingsWindowID)
+        Task { @MainActor in
+            NSApp.activate()
+            let window = NSApp.windows.first { $0.identifier?.rawValue.hasPrefix(Self.settingsWindowID) == true }
+            window?.makeKeyAndOrderFront(nil)
+            window?.orderFrontRegardless()
+        }
     }
 }
