@@ -34,6 +34,8 @@ final class NotchWindowController {
     /// The two-finger swipe under way: where it started, measured from the
     /// notch's centre line, what it started on, and how far it has gone.
     private var scrollSwipe: ScrollSwipe?
+    /// Asks Terminal or iTerm which tab is in front while one of them is.
+    private var frontTabCheck: Task<Void, Never>?
 
     private struct ScrollSwipe {
         let activity: IslandActivity?
@@ -106,10 +108,12 @@ final class NotchWindowController {
                 MainActor.assumeIsolated {
                     self?.scheduleFullScreenCheck()
                     self?.measureAppMenus()
+                    self?.frontAppChanged()
                 }
             })
         }
         scheduleFullScreenCheck()
+        frontAppChanged()
         observeActivityCount()
 
         // Posted by loginwindow to every app as the screen locks and unlocks.
@@ -215,6 +219,30 @@ final class NotchWindowController {
                 Self.log.debug("\(name, privacy: .public) menus couldn't be measured")
             }
             self.viewModel.appMenus = settled
+        }
+    }
+
+    /// An activity leaves the notch while what it comes from is in front.
+    /// Switching tabs doesn't switch apps, so while Terminal or iTerm is in
+    /// front with a command or Claude Code running in it, which tab is in
+    /// front is asked again every so often.
+    private func frontAppChanged() {
+        frontTabCheck?.cancel()
+        let app = NSWorkspace.shared.frontmostApplication
+        let id = app?.bundleIdentifier
+        viewModel.frontApp = NotchViewModel.FrontApp(bundleIdentifier: id)
+        guard let id, TerminalWindow.knowsTabs(id) else { return }
+        frontTabCheck = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if self.viewModel.wantsFrontTab {
+                    let tty = TerminalWindow.frontTTY(of: id)
+                    if self.viewModel.frontApp?.tty != tty {
+                        self.viewModel.frontApp?.tty = tty
+                    }
+                }
+                try? await Task.sleep(for: .seconds(1.5))
+            }
         }
     }
 

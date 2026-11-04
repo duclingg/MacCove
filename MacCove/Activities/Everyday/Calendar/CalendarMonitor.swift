@@ -117,6 +117,8 @@ final class CalendarMonitor {
         let source: String
     }
 
+    /// Calendar's, where an event comes from.
+    static let appBundleIdentifier = "com.apple.iCal"
     static let enabledKey = "CalendarEventsEnabled"
     /// Calendars left out, rather than the ones picked, so a new calendar
     /// counts until it's unticked.
@@ -788,7 +790,7 @@ final class CalendarMonitor {
             .flatMap { URL(string: "ical://ekevent/\($0)?method=show&options=more") }
         // Otherwise just Calendar.
         if url.map({ NSWorkspace.shared.open($0) }) != true {
-            Self.openApp("com.apple.iCal")
+            Self.openApp(Self.appBundleIdentifier)
         }
         dismiss()
     }

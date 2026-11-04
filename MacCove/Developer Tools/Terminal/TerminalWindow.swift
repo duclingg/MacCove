@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import CoreServices
 
 /// Brings forward the window a command ran in. Terminal and iTerm say
 /// which tab has which terminal device over Apple Events, so their exact
@@ -14,6 +15,33 @@ import AppKit
 enum TerminalWindow {
     private static let terminal = "com.apple.Terminal"
     private static let iTerm = "com.googlecode.iterm2"
+
+    /// Whether the app can say which of its tabs is in front.
+    static func knowsTabs(_ appBundleIdentifier: String) -> Bool {
+        appBundleIdentifier == terminal || appBundleIdentifier == iTerm
+    }
+
+    /// The terminal device of the tab in front in Terminal or iTerm, or
+    /// `nil` when it can't say. Only asks once MacCove may control that
+    /// terminal, given the first time a window was brought forward, so
+    /// this never prompts by itself.
+    static func frontTTY(of appBundleIdentifier: String) -> String? {
+        let source = switch appBundleIdentifier {
+        case terminal: "tell application id \"\(terminal)\" to get tty of selected tab of front window"
+        case iTerm: "tell application id \"\(iTerm)\" to get tty of current session of current window"
+        default: ""
+        }
+        guard !source.isEmpty, mayControl(appBundleIdentifier) else { return nil }
+        var error: NSDictionary?
+        let tty = NSAppleScript(source: source)?.executeAndReturnError(&error).stringValue
+        return error == nil ? tty : nil
+    }
+
+    private static func mayControl(_ appBundleIdentifier: String) -> Bool {
+        let target = NSAppleEventDescriptor(bundleIdentifier: appBundleIdentifier)
+        let status = AEDeterminePermissionToAutomateTarget(target.aeDesc, AEEventClass(typeWildCard), AEEventID(typeWildCard), false)
+        return status == OSStatus(noErr)
+    }
 
     static func bringForward(appBundleIdentifier: String?, tty: String?) {
         guard let appBundleIdentifier else { return }

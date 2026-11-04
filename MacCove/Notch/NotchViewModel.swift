@@ -139,6 +139,17 @@ final class NotchViewModel {
     /// The latest last.
     private var hiddenActivities: [IslandActivity] = []
 
+    /// The app in front, and in Terminal or iTerm the terminal device of
+    /// the tab in front. An activity steps out of the notch while what it
+    /// comes from is in front, as on the iPhone while you're in the app,
+    /// and comes back when you switch away.
+    struct FrontApp: Equatable {
+        var bundleIdentifier: String?
+        var tty: String?
+    }
+
+    var frontApp: FrontApp?
+
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
     @ObservationIgnored private var alertTask: Task<Void, Never>?
@@ -281,7 +292,7 @@ final class NotchViewModel {
             running.append(.nowPlaying)
         }
         if !includingHidden {
-            running.removeAll { hiddenActivities.contains($0) }
+            running.removeAll { hiddenActivities.contains($0) || isInFront($0) }
         }
         if running.count > Self.maxActivities, let promotedActivity,
            let index = running.firstIndex(of: promotedActivity), index > 1 {
@@ -600,6 +611,35 @@ final class NotchViewModel {
         case .claudeCode: !claude.needsAnswer
         case .xcode, .terminal, .github, .clipboard, .calendar, .nowPlaying: true
         }
+    }
+
+    /// Whether what the activity comes from is in front: Xcode, Calendar,
+    /// the app playing, or the terminal tab a command or Claude Code runs
+    /// in. Any tab of that terminal when it can't say which. An agent
+    /// waiting for your answer stays, since its buttons answer it.
+    private func isInFront(_ activity: IslandActivity) -> Bool {
+        guard let front = frontApp, let frontID = front.bundleIdentifier else { return false }
+        func isFront(_ app: String?, tty: String?) -> Bool {
+            guard app == frontID else { return false }
+            guard let tty, let frontTTY = front.tty else { return true }
+            return tty == frontTTY
+        }
+        switch activity {
+        case .xcode: return frontID == XcodeScripting.bundleIdentifier
+        case .terminal: return isFront(terminal.command?.appBundleIdentifier, tty: terminal.command?.tty)
+        case .claudeCode: return !claude.needsAnswer && isFront(claude.session?.appBundleIdentifier, tty: claude.session?.tty)
+        case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
+        case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
+        case .github, .clipboard, .signIn, .charging, .lowBattery: return false
+        }
+    }
+
+    /// Whether a command or Claude Code runs in the app in front with a
+    /// known tab, so it's worth asking which tab is in front.
+    var wantsFrontTab: Bool {
+        guard let frontID = frontApp?.bundleIdentifier else { return false }
+        return (terminal.command?.appBundleIdentifier == frontID && terminal.command?.tty != nil)
+            || (claude.session?.appBundleIdentifier == frontID && claude.session?.tty != nil)
     }
 
     /// Something new to show brings a tucked-away activity back.
