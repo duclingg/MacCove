@@ -25,6 +25,8 @@ enum IslandActivity: Hashable {
     case terminal
     /// A Claude Code session: working, waiting for approval, finished.
     case claudeCode
+    /// A pull request's checks, or a review someone asked you for.
+    case github
     /// "Copied" for a moment, or the last few copies.
     case clipboard
     case nowPlaying
@@ -34,7 +36,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .clipboard, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .nowPlaying: .zero
         }
     }
 }
@@ -89,6 +91,7 @@ final class NotchViewModel {
     let xcode: XcodeBuildMonitor
     let terminal: TerminalCommandMonitor
     let claude: ClaudeCodeMonitor
+    let github: GitHubMonitor
     let clipboard: ClipboardMonitor
 
     var notchSize = CGSize(width: 186, height: 37)
@@ -136,6 +139,7 @@ final class NotchViewModel {
         xcode: XcodeBuildMonitor,
         terminal: TerminalCommandMonitor,
         claude: ClaudeCodeMonitor,
+        github: GitHubMonitor,
         clipboard: ClipboardMonitor
     ) {
         self.nowPlaying = nowPlaying
@@ -145,6 +149,7 @@ final class NotchViewModel {
         self.xcode = xcode
         self.terminal = terminal
         self.claude = claude
+        self.github = github
         self.clipboard = clipboard
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
@@ -168,6 +173,13 @@ final class NotchViewModel {
         }
         claude.onEvent = { [weak self] event in
             self?.claudeEvent(event)
+        }
+        github.onEvent = { [weak self] event in
+            self?.githubEvent(event)
+        }
+        github.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.isHovering || self.presentation == .expanded
         }
         clipboard.onEvent = { [weak self] event in
             self?.clipboardEvent(event)
@@ -230,6 +242,9 @@ final class NotchViewModel {
         }
         if isShowingAll, terminal.command != nil {
             running.append(.terminal)
+        }
+        if isShowingAll, github.activity != nil {
+            running.append(.github)
         }
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
@@ -331,6 +346,7 @@ final class NotchViewModel {
             case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
             case .claudeCode?: ClaudeCodeExpandedView.bodyHeight(for: claude.session)
+            case .github?: GitHubExpandedView.bodyHeight(for: github.activity)
             case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
             default: BatteryExpandedView.bodyHeight
             }
@@ -529,6 +545,7 @@ final class NotchViewModel {
         } else if presentation == .compact {
             scheduleAlertDismissal(after: .seconds(1.2))
             terminal.leaveIfDue(after: .seconds(1.2))
+            github.leaveIfDue(after: .seconds(1.2))
             clipboard.leaveIfDue(after: .seconds(1.2))
         }
     }
@@ -637,6 +654,16 @@ final class NotchViewModel {
         case .failed: activityFailed(.terminal)
         case .finished: break
         case .ended: activityEnded(.terminal)
+        }
+    }
+
+    /// A failed check opens by itself, as a failed build does. Passing,
+    /// ready to merge and review requests just show.
+    private func githubEvent(_ event: GitHubMonitor.Event) {
+        switch event {
+        case .started: activityStarted(.github)
+        case .failed: activityFailed(.github)
+        case .ended: activityEnded(.github)
         }
     }
 
@@ -771,6 +798,7 @@ final class NotchViewModel {
             self.isRevealedByHover = false
             self.scheduleAlertDismissal(after: .seconds(1.2))
             self.terminal.leaveIfDue(after: .seconds(1.2))
+            self.github.leaveIfDue(after: .seconds(1.2))
             self.clipboard.leaveIfDue(after: .seconds(1.2))
         }
     }

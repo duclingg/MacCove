@@ -9,6 +9,7 @@ struct MacCoveApp: App {
     @State private var hasAccessibility = AppMenuExtent.isAllowed
     @AppStorage(TerminalHook.thresholdKey) private var terminalThreshold = TerminalHook.defaultThreshold
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
+    @AppStorage(GitHubSetup.sourceKey) private var githubSource = ""
     /// Copies don't show, or ask every time, once macOS restricts reading
     /// the clipboard.
     @State private var isClipboardRestricted = ClipboardMonitor.isAccessRestricted
@@ -32,6 +33,9 @@ struct MacCoveApp: App {
             }
             Button("Set Up Claude Code…") {
                 ClaudeCodeSetup.showSetup()
+            }
+            Button(githubSource.isEmpty ? "Connect GitHub…" : "GitHub Pull Requests…") {
+                appDelegate.showGitHubSetup()
             }
             if !hasAccessibility {
                 Button("Allow Accessibility Access…") {
@@ -84,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var xcode: XcodeBuildMonitor?
     private var terminal: TerminalCommandMonitor?
     private var clipboard: ClipboardMonitor?
+    private var github: GitHubMonitor?
     private var agentBridge: AgentBridge?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -97,9 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let xcode = XcodeBuildMonitor()
         let terminal = TerminalCommandMonitor()
         let claude = ClaudeCodeMonitor()
+        let github = GitHubMonitor()
         let clipboard = ClipboardMonitor()
         self.xcode = xcode
         self.terminal = terminal
+        self.github = github
         self.clipboard = clipboard
         let viewModel = NotchViewModel(
             nowPlaying: nowPlaying,
@@ -109,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             xcode: xcode,
             terminal: terminal,
             claude: claude,
+            github: github,
             clipboard: clipboard
         )
         self.viewModel = viewModel
@@ -118,6 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         signIn.start()
         if ClipboardMonitor.isEnabled {
             clipboard.start()
+        }
+        if GitHubSetup.source != nil {
+            github.start()
         }
 
         // Hook events from Claude Code, by the agent they're for.
@@ -153,6 +164,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showClipboardHistory() {
         viewModel?.showClipboardHistory()
+    }
+
+    func showGitHubSetup() {
+        guard let github else { return }
+        GitHubSetup.showSetup(monitor: github)
     }
 
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, replyEvent: NSAppleEventDescriptor) {
