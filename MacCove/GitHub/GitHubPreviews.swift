@@ -72,6 +72,34 @@ private let review = GitHubMonitor.Activity(
     phase: .review
 )
 
+private func reviewed(_ verdict: GitHubPullRequest.Review.Verdict, text: String, path: String? = nil) -> GitHubMonitor.Activity {
+    GitHubMonitor.Activity(
+        pullRequest: pullRequest(checks: [check("build-and-test", .passed)]),
+        phase: .reviewed,
+        review: GitHubPullRequest.Review(
+            id: "review",
+            verdict: verdict,
+            author: "octocat",
+            avatarURL: URL(string: "https://avatars.githubusercontent.com/u/583231?s=96"),
+            text: text,
+            path: path,
+            url: nil,
+            submittedAt: .now
+        )
+    )
+}
+
+private let changesRequested = reviewed(
+    .changesRequested,
+    text: "The notch still flashes on the external display when the menu bar auto-hides. Can we wait for the screen parameters to settle before measuring?"
+)
+
+private let commented = reviewed(
+    .commented,
+    text: "Should this use the cached frame instead?",
+    path: "MacCove/Notch/NotchWindowController.swift"
+)
+
 private func compact(_ activity: GitHubMonitor.Activity) -> some View {
     IslandPreview(
         size: CGSize(width: NotchViewModel.compactWidth(notch: notch), height: notch.height),
@@ -121,5 +149,21 @@ private func expanded(_ activity: GitHubMonitor.Activity) -> some View {
 
 #Preview("Review requested, expanded") {
     expanded(review)
+}
+
+#Preview("Changes requested") {
+    compact(changesRequested)
+}
+
+#Preview("Changes requested, expanded") {
+    expanded(changesRequested)
+}
+
+#Preview("Approved, expanded") {
+    expanded(reviewed(.approved, text: "Looks great, thanks!"))
+}
+
+#Preview("Comment on the code, expanded") {
+    expanded(commented)
 }
 #endif

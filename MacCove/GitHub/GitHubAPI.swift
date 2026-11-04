@@ -21,6 +21,28 @@ nonisolated struct GitHubPullRequest: Equatable, Identifiable, Sendable {
         let workflowRunID: Int?
     }
 
+    /// A review someone left: approved, changes requested or comments.
+    nonisolated struct Review: Equatable, Identifiable, Sendable {
+        nonisolated enum Verdict: Equatable, Sendable {
+            case approved
+            case changesRequested
+            case commented
+        }
+
+        let id: String
+        let verdict: Verdict
+        let author: String
+        let avatarURL: URL?
+        /// What they wrote, on one line: the review's own text or, for a
+        /// review that's only comments on the code, the first of those.
+        let text: String
+        /// The file the first comment is on, when `text` is one.
+        let path: String?
+        /// The review on the pull request's page.
+        let url: URL?
+        let submittedAt: Date?
+    }
+
     /// GraphQL's node ID, which merging takes.
     let id: String
     let number: Int
@@ -30,7 +52,7 @@ nonisolated struct GitHubPullRequest: Equatable, Identifiable, Sendable {
     let repository: String
     let headSHA: String?
     let isDraft: Bool
-    let checks: [Check]
+    var checks: [Check]
     /// APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, or `nil` where the
     /// repository asks for no reviews.
     let reviewDecision: String?
@@ -44,6 +66,8 @@ nonisolated struct GitHubPullRequest: Equatable, Identifiable, Sendable {
     let canMerge: Bool
     /// MERGE, SQUASH or REBASE: what GitHub's own button would do.
     let mergeMethod: String
+    /// The last few reviews, oldest first; only for your own.
+    var reviews: [Review] = []
 
     /// "MacCove", without the owner.
     var repositoryName: String {
@@ -216,6 +240,13 @@ nonisolated struct GitHubAPI: Sendable {
           ...Basics
           reviewDecision mergeable
           latestOpinionatedReviews(first: 10) { nodes { state } }
+          reviews(last: 5, states: [APPROVED, CHANGES_REQUESTED, COMMENTED]) {
+            nodes {
+              id state url submittedAt body
+              author { login avatarUrl(size: 96) }
+              comments(first: 1) { nodes { body path } }
+            }
+          }
           commits(last: 1) {
             nodes {
               commit {
@@ -283,6 +314,56 @@ nonisolated private struct PullRequestNode: Decodable {
 
     nonisolated struct Review: Decodable {
         let state: String
+    }
+
+    nonisolated struct FullReview: Decodable {
+        nonisolated struct Author: Decodable {
+            let login: String
+            let avatarUrl: URL?
+        }
+
+        nonisolated struct Comment: Decodable {
+            let body: String
+            let path: String?
+        }
+
+        let id: String
+        let state: String
+        let url: URL?
+        let submittedAt: Date?
+        let body: String
+        let author: Author?
+        let comments: Nodes<Comment>?
+
+        var review: GitHubPullRequest.Review? {
+            let verdict: GitHubPullRequest.Review.Verdict
+            switch state {
+            case "APPROVED": verdict = .approved
+            case "CHANGES_REQUESTED": verdict = .changesRequested
+            case "COMMENTED": verdict = .commented
+            default: return nil
+            }
+            let comment = comments?.nodes.first ?? nil
+            let ownText = Self.oneLine(body)
+            let text = ownText.isEmpty ? Self.oneLine(comment?.body ?? "") : ownText
+            // A comment review with nothing in it says nothing.
+            guard verdict != .commented || !text.isEmpty else { return nil }
+            return GitHubPullRequest.Review(
+                id: id,
+                verdict: verdict,
+                author: author?.login ?? "Someone",
+                avatarURL: author?.avatarUrl,
+                text: text,
+                path: ownText.isEmpty ? comment?.path : nil,
+                url: url,
+                submittedAt: submittedAt
+            )
+        }
+
+        /// Markdown's line breaks and indents as single spaces.
+        private static func oneLine(_ text: String) -> String {
+            text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }
     }
 
     nonisolated struct Commit: Decodable {
@@ -380,6 +461,7 @@ nonisolated private struct PullRequestNode: Decodable {
     let reviewDecision: String?
     let mergeable: String?
     let latestOpinionatedReviews: Nodes<Review>?
+    let reviews: Nodes<FullReview>?
     let commits: Nodes<CommitNode>?
 
     var pullRequest: GitHubPullRequest? {
@@ -403,7 +485,8 @@ nonisolated private struct PullRequestNode: Decodable {
             deletions: deletions ?? 0,
             changedFiles: changedFiles ?? 0,
             canMerge: canMerge,
-            mergeMethod: repository.viewerDefaultMergeMethod ?? "MERGE"
+            mergeMethod: repository.viewerDefaultMergeMethod ?? "MERGE",
+            reviews: reviews?.nodes.compactMap { $0?.review } ?? []
         )
     }
 }

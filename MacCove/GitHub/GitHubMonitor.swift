@@ -1,8 +1,8 @@
 import AppKit
 
 /// Your pull requests and review requests on GitHub, as the notch shows
-/// them: checks running, a check failed, ready to merge, or someone asking
-/// for your review.
+/// them: checks running, a check failed, ready to merge, a new review on
+/// one of yours, or someone asking for your review.
 ///
 /// Polls GitHub's GraphQL API every 30 seconds while checks are running
 /// and every minute otherwise; there's no webhook to wait on. In between,
@@ -18,7 +18,7 @@ final class GitHubMonitor {
     enum Event {
         /// Something new to show, or what's shown moved on.
         case started
-        /// A check failed: opens by itself.
+        /// A check failed, or someone requested changes: opens by itself.
         case failed
         /// Nothing left to show.
         case ended
@@ -34,18 +34,37 @@ final class GitHubMonitor {
         case ready
         /// Someone asked for your review.
         case review
+        /// Someone reviewed one of yours: approved, requested changes or
+        /// commented.
+        case reviewed
     }
 
     struct Activity: Equatable, Identifiable {
         var pullRequest: GitHubPullRequest
         var phase: Phase
+        /// The newest review, for `reviewed`.
+        var review: GitHubPullRequest.Review?
 
-        var id: String { pullRequest.id }
+        /// A pull request of yours can have checks and a new review to
+        /// show at once, each its own activity.
+        var id: String {
+            phase == .reviewed ? "\(pullRequest.id)/reviewed" : pullRequest.id
+        }
 
         /// One for each pull request, commit and phase, so a dismissed
-        /// failure comes back for a new commit, or a re-run that fails again.
+        /// failure comes back for a new commit, or a re-run that fails
+        /// again. A review has one of its own.
         var key: String {
-            phase == .review ? "\(id)@review" : "\(id)@\(pullRequest.headSHA ?? "")@\(phase.rawValue)"
+            switch phase {
+            case .review: "\(id)@review"
+            case .reviewed: "\(id)@\(review?.id ?? "")"
+            default: "\(id)@\(pullRequest.headSHA ?? "")@\(phase.rawValue)"
+            }
+        }
+
+        /// Opens by itself when it's new.
+        var isUrgent: Bool {
+            phase == .failed || review?.verdict == .changesRequested
         }
     }
 
@@ -77,8 +96,12 @@ final class GitHubMonitor {
     @ObservationIgnored private var lastKeys: [String: String] = [:]
     @ObservationIgnored private var changedAt: [String: Date] = [:]
     @ObservationIgnored private var dismissed: Set<String> = []
-    /// Failures seen since the last poll, which may open by themselves.
+    /// Failures and requested changes seen since the last poll, which may
+    /// open by themselves.
     @ObservationIgnored private var newFailures: Set<String> = []
+    /// Every review polls have turned up, so an older one that becomes the
+    /// newest again, when a later one is dismissed on GitHub, isn't new.
+    @ObservationIgnored private var seenReviewIDs: Set<String> = []
     @ObservationIgnored private var hasBaseline = false
     /// Takes away a passed result after a moment.
     @ObservationIgnored private var passedDismissal: Task<Void, Never>?
@@ -119,6 +142,7 @@ final class GitHubMonitor {
         lastKeys = [:]
         changedAt = [:]
         dismissed = []
+        seenReviewIDs = []
         hasBaseline = false
         update()
     }
@@ -291,10 +315,14 @@ final class GitHubMonitor {
             if !hasBaseline, activity.phase != .running {
                 // Already like this when MacCove started.
                 dismissed.insert(key)
-            } else if activity.phase == .failed {
+            } else if let review = activity.review, seenReviewIDs.contains(review.id) {
+                dismissed.insert(key)
+            } else if activity.isUrgent {
                 newFailures.insert(key)
             }
         }
+        coverApprovalsWhenReady(in: snapshot)
+        seenReviewIDs.formUnion(snapshot.authored.flatMap { $0.reviews.map(\.id) })
         // Closed, merged, or no longer asking for you.
         for id in lastKeys.keys where !seen.contains(id) {
             lastKeys[id] = nil
@@ -306,11 +334,33 @@ final class GitHubMonitor {
         update()
     }
 
+    /// An approval that makes a pull request ready to merge is said by
+    /// Ready to Merge, with the approvals, so it doesn't show twice.
+    private func coverApprovalsWhenReady(in snapshot: GitHubSnapshot) {
+        let activities = activities(in: snapshot)
+        for reviewed in activities where reviewed.review?.verdict == .approved {
+            let isReadyShowing = activities.contains {
+                $0.phase == .ready && $0.pullRequest.id == reviewed.pullRequest.id && !dismissed.contains($0.key)
+            }
+            if isReadyShowing {
+                dismissed.insert(reviewed.key)
+            }
+        }
+    }
+
     /// Every pull request with something to say, in the repositories
     /// watched. Your own come first, should you have asked yourself.
     private func activities(in snapshot: GitHubSnapshot) -> [Activity] {
-        var activities = snapshot.authored.filter(isWatched).compactMap { pullRequest in
+        let mine = snapshot.authored.filter(isWatched)
+        var activities = mine.compactMap { pullRequest in
             Self.phase(of: pullRequest).map { Activity(pullRequest: pullRequest, phase: $0) }
+        }
+        // The newest review by someone else: your own replies don't count.
+        for pullRequest in mine {
+            let others = pullRequest.reviews.filter { $0.author.caseInsensitiveCompare(snapshot.login) != .orderedSame }
+            if let review = others.last {
+                activities.append(Activity(pullRequest: pullRequest, phase: .reviewed, review: review))
+            }
         }
         let authored = Set(snapshot.authored.map(\.id))
         activities += snapshot.reviewRequested
@@ -319,22 +369,25 @@ final class GitHubMonitor {
         return activities
     }
 
-    private static func priority(_ phase: Phase) -> Int {
-        switch phase {
+    private static func priority(_ activity: Activity) -> Int {
+        switch activity.phase {
         case .failed: 0
-        case .running: 1
-        case .ready: 2
-        case .passed: 3
-        case .review: 4
+        case .reviewed where activity.isUrgent: 1
+        case .running: 2
+        case .ready: 3
+        case .reviewed: 4
+        case .passed: 5
+        case .review: 6
         }
     }
 
-    /// Picks the one to show: a failure first, then checks running, then
-    /// the newest of the rest. Tells the notch when that changes.
+    /// Picks the one to show: a failure first, then changes requested,
+    /// checks running, and the newest of the rest. Tells the notch when
+    /// that changes.
     private func update() {
         let candidates = latest.map(activities(in:))?.filter { !dismissed.contains($0.key) } ?? []
         let next = candidates.min { lhs, rhs in
-            let left = Self.priority(lhs.phase), right = Self.priority(rhs.phase)
+            let left = Self.priority(lhs), right = Self.priority(rhs)
             if left != right { return left < right }
             return (changedAt[lhs.id] ?? .distantPast) > (changedAt[rhs.id] ?? .distantPast)
         }
@@ -350,7 +403,7 @@ final class GitHubMonitor {
         if next.phase == .passed {
             scheduleLeaving(next.key)
         }
-        onEvent?(next.phase == .failed && newFailures.contains(next.key) ? .failed : .started)
+        onEvent?(next.isUrgent && newFailures.contains(next.key) ? .failed : .started)
     }
 
     // MARK: - Buttons
@@ -362,9 +415,10 @@ final class GitHubMonitor {
         update()
     }
 
+    /// A review opens at the review itself.
     func openPullRequest() {
         guard let activity else { return }
-        NSWorkspace.shared.open(activity.pullRequest.url)
+        NSWorkspace.shared.open(activity.review?.url ?? activity.pullRequest.url)
     }
 
     /// View, Open Pull Request: once it's open in the browser, the notch
@@ -496,12 +550,9 @@ final class GitHubMonitor {
 
 extension GitHubPullRequest {
     nonisolated func with(checks: [Check]) -> GitHubPullRequest {
-        GitHubPullRequest(
-            id: id, number: number, title: title, url: url, repository: repository, headSHA: headSHA,
-            isDraft: isDraft, checks: checks, reviewDecision: reviewDecision, approvals: approvals,
-            mergeable: mergeable, additions: additions, deletions: deletions, changedFiles: changedFiles,
-            canMerge: canMerge, mergeMethod: mergeMethod
-        )
+        var copy = self
+        copy.checks = checks
+        return copy
     }
 }
 

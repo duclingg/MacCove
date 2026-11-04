@@ -46,14 +46,79 @@ private struct PullRequestGlyph: View {
     }
 }
 
-/// Blue for a review request, red for a failure, green once it's passed,
-/// white while checks run.
-private func phaseTint(_ phase: GitHubMonitor.Phase?) -> Color {
-    switch phase {
+/// Blue for a review request, red for a failure or changes requested,
+/// green once it's passed or approved, white while checks run or for a
+/// comment.
+private func activityTint(_ activity: GitHubMonitor.Activity?) -> Color {
+    switch activity?.phase {
     case .review?: .githubReview
     case .failed?: .islandError
     case .ready?, .passed?: .islandSucceeded
+    case .reviewed?: verdictColor(activity?.review?.verdict)
     case .running?, nil: .white
+    }
+}
+
+private func verdictColor(_ verdict: GitHubPullRequest.Review.Verdict?) -> Color {
+    switch verdict {
+    case .approved?: .islandSucceeded
+    case .changesRequested?: .islandError
+    case .commented?, nil: .white
+    }
+}
+
+/// "approved", "requested changes on", "commented on".
+private func verdictPhrase(_ verdict: GitHubPullRequest.Review.Verdict) -> String {
+    switch verdict {
+    case .approved: "approved"
+    case .changesRequested: "requested changes on"
+    case .commented: "commented on"
+    }
+}
+
+/// The reviewer's GitHub picture, with a badge for what they said: a
+/// check, an exclamation mark for changes, or an ellipsis for comments.
+private struct ReviewerAvatar: View {
+    let review: GitHubPullRequest.Review
+    let size: CGFloat
+
+    var body: some View {
+        AsyncImage(url: review.avatarURL) { phase in
+            if let image = phase.image {
+                image
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: (size * 0.5).rounded()))
+                    .foregroundStyle(.islandSecondary)
+                    .frame(width: size, height: size)
+                    .background(Color.white.opacity(0.14))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(alignment: .bottomTrailing) {
+            badge
+                .offset(x: size * 0.1, y: size * 0.1)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var badge: some View {
+        let badgeSize = (size * 0.44).rounded()
+        let (symbol, background, foreground): (String, Color, Color) = switch review.verdict {
+        case .approved: ("checkmark", Color.islandSucceeded, Color.onGreen)
+        case .changesRequested: ("exclamationmark", Color.islandError, Color.white)
+        case .commented: ("ellipsis", Color(white: 0.38), Color.white)
+        }
+        return Image(systemName: symbol)
+            .font(.system(size: (badgeSize * 0.55).rounded(), weight: .heavy))
+            .foregroundStyle(foreground)
+            .frame(width: badgeSize, height: badgeSize)
+            .background(Circle().fill(background))
+            .background(Circle().fill(.black).padding(-max(1, (badgeSize * 0.12).rounded())))
     }
 }
 
@@ -107,7 +172,8 @@ private struct ChecksRing: View {
 
 /// The pull request glyph in the left wing. In the right: the checks done
 /// as a ring while they run, a red cross for a failure, a green check once
-/// they've passed, or a blue dot for a review request.
+/// they've passed, the reviewer's picture for a new review, or a blue dot
+/// for a review request.
 struct GitHubCompactView: View {
     let github: GitHubMonitor
     let notchSize: CGSize
@@ -151,6 +217,10 @@ struct GitHubCompactView: View {
                 .fill(Color.githubReview)
                 .frame(width: 8, height: 8)
                 .frame(width: size, height: size)
+        case .reviewed:
+            if let review = activity.review {
+                ReviewerAvatar(review: review, size: size)
+            }
         }
     }
 
@@ -164,13 +234,16 @@ struct GitHubCompactView: View {
         case .passed: return "Checks passed on \(pullRequest)"
         case .ready: return "\(pullRequest) is ready to merge"
         case .review: return "Review requested on \(pullRequest)"
+        case .reviewed:
+            guard let review = activity.review else { return "New review on \(pullRequest)" }
+            return "\(review.author) \(verdictPhrase(review.verdict)) \(pullRequest)"
         }
     }
 }
 
 /// GitHub in a bubble beside another activity: the glyph inside the ring
-/// while checks run, inside a red one after a failure, or tinted for how
-/// it stands.
+/// while checks run, inside a red one after a failure, the reviewer's
+/// picture for a new review, or tinted for how it stands.
 struct GitHubMinimalView: View {
     let github: GitHubMonitor
     let notchSize: CGSize
@@ -200,8 +273,12 @@ struct GitHubMinimalView: View {
                         .frame(width: layout.ringDiameter, height: layout.ringDiameter)
                     PullRequestGlyph(color: .islandError, size: innerSize)
                 }
+            case .reviewed? where activity?.review != nil:
+                if let review = activity?.review {
+                    ReviewerAvatar(review: review, size: layout.artSize)
+                }
             default:
-                PullRequestGlyph(color: phaseTint(activity?.phase), size: layout.artSize)
+                PullRequestGlyph(color: activityTint(activity), size: layout.artSize)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -211,8 +288,9 @@ struct GitHubMinimalView: View {
 }
 
 /// Opened up; the glyph opens the pull request. Checks running: a bar of
-/// checks done and Open on GitHub. Otherwise a box saying what happened,
-/// and buttons for what to do about it.
+/// checks done and Open on GitHub. A new review: who, and what they wrote.
+/// Otherwise a box saying what happened, and buttons for what to do about
+/// it.
 struct GitHubExpandedView: View {
     let github: GitHubMonitor
     let notchHeight: CGFloat
@@ -230,12 +308,20 @@ struct GitHubExpandedView: View {
     private static let bottomGap: CGFloat = 14
     /// Failed checks listed by name; past this, how many more.
     private static let maxFailedLines = 3
+    private static let reviewFont = NSFont.systemFont(ofSize: 13)
+    private static let reviewFontLineHeight = NSLayoutManager().defaultLineHeight(for: reviewFont)
+    private static let reviewLineHeight = reviewFontLineHeight.rounded(.up) + 1
+    /// A long review is cut off here; Open Review has the rest.
+    private static let reviewLineLimit = 3
 
     static func bodyHeight(for activity: GitHubMonitor.Activity?) -> CGFloat {
         var height = NotchViewModel.expandedTopGap + headerHeight + bottomGap
         guard let activity else { return height }
         if activity.phase == .running {
             height += barGap + barHeight + footerGap + footerHeight
+        } else if activity.phase == .reviewed, let review = activity.review {
+            height += codeGap + codePadding.top + reviewBoxHeight(review) + codePadding.bottom
+            height += chipsGap + chipHeight
         } else {
             let lines = codeLines(for: activity).count
             if lines > 0 {
@@ -252,6 +338,11 @@ struct GitHubExpandedView: View {
                 header(activity)
                 if activity.phase == .running {
                     progress(activity.pullRequest)
+                } else if activity.phase == .reviewed, let review = activity.review {
+                    reviewBox(review)
+                        .padding(.top, Self.codeGap)
+                    buttons(activity)
+                        .padding(.top, Self.chipsGap)
                 } else {
                     let lines = Self.codeLines(for: activity)
                     if !lines.isEmpty {
@@ -273,10 +364,15 @@ struct GitHubExpandedView: View {
             Button {
                 github.openPullRequest()
             } label: {
-                PullRequestGlyph(color: phaseTint(activity.phase), size: 26)
-                    .frame(width: 44, height: 44)
-                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.12)))
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                if let review = activity.review {
+                    ReviewerAvatar(review: review, size: 44)
+                        .contentShape(Circle())
+                } else {
+                    PullRequestGlyph(color: activityTint(activity), size: 26)
+                        .frame(width: 44, height: 44)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.12)))
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open on GitHub")
@@ -369,6 +465,49 @@ struct GitHubExpandedView: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.08)))
     }
 
+    /// What the reviewer wrote, up to three lines, under the file it's on
+    /// for a comment on the code.
+    private func reviewBox(_ review: GitHubPullRequest.Review) -> some View {
+        let lines = Self.reviewTextLines(review.text)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            if let path = review.path {
+                Text(path)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.islandSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(height: Self.codeLineHeight)
+            }
+            Text(review.text)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.codeText)
+                .lineLimit(Self.reviewLineLimit)
+                .lineSpacing(max(0, Self.reviewLineHeight - Self.reviewFontLineHeight))
+                .truncationMode(.tail)
+                .frame(height: Self.reviewLineHeight * CGFloat(lines), alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Self.codePadding)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.08)))
+    }
+
+    private static func reviewBoxHeight(_ review: GitHubPullRequest.Review) -> CGFloat {
+        (review.path == nil ? 0 : codeLineHeight) + reviewLineHeight * CGFloat(reviewTextLines(review.text))
+    }
+
+    /// The box's height is worked out before anything is drawn, so the
+    /// text is measured the way it will wrap, up to `reviewLineLimit`.
+    private static func reviewTextLines(_ text: String) -> Int {
+        let width = NotchViewModel.expandedWidth - NotchViewModel.expandedInset * 2 - codePadding.leading - codePadding.trailing
+        let bounds = NSAttributedString(string: text, attributes: [.font: reviewFont]).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let lines = Int((bounds.height / reviewFontLineHeight).rounded())
+        return min(max(lines, 1), reviewLineLimit)
+    }
+
     @ViewBuilder
     private func buttons(_ activity: GitHubMonitor.Activity) -> some View {
         HStack(spacing: 8) {
@@ -394,6 +533,13 @@ struct GitHubExpandedView: View {
             case .review:
                 chip("Later") { github.dismiss() }
                 chip("Open Pull Request", background: .githubReview, foreground: .white) { github.openAndDismiss() }
+            case .reviewed:
+                chip("Later") { github.dismiss() }
+                if activity.review?.verdict == .approved {
+                    chip("Open Review", background: .islandSucceeded, foreground: .onGreen) { github.openAndDismiss() }
+                } else {
+                    chip("Open Review", background: .white, foreground: .onWhite) { github.openAndDismiss() }
+                }
             case .running:
                 EmptyView()
             }
@@ -436,6 +582,13 @@ struct GitHubExpandedView: View {
         case .passed: return "Checks passed"
         case .ready: return "Ready to merge"
         case .review: return "Review requested"
+        case .reviewed:
+            guard let review = activity.review else { return "New review" }
+            return switch review.verdict {
+            case .approved: "\(review.author) approved"
+            case .changesRequested: "\(review.author) requested changes"
+            case .commented: "\(review.author) commented"
+            }
         }
     }
 
@@ -447,7 +600,7 @@ struct GitHubExpandedView: View {
         let passed = checks.filter { $0.status == .passed }.count
         var lines: [(String, Color)] = []
         switch activity.phase {
-        case .running:
+        case .running, .reviewed:
             break
         case .failed:
             let failed = checks.filter { $0.status == .failed }
