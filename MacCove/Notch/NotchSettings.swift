@@ -66,6 +66,8 @@ enum NotchSettings {
         }
     }
 
+    /// MacCove's own Show in Menu Bar, before it followed System
+    /// Settings. Read once by `MenuBarItem`, then removed.
     static let showInMenuBarKey = "ShowInMenuBar"
     static let openingKey = "NotchOpens"
     static let trackpadFeedbackKey = "TrackpadFeedback"
@@ -85,10 +87,6 @@ enum NotchSettings {
     /// How long the cursor rests on the notch before it opens, for After a
     /// Short Pause.
     static let openingPause: Duration = .milliseconds(400)
-
-    static var showsInMenuBar: Bool {
-        bool(showInMenuBarKey, default: true)
-    }
 
     static var opening: Opening {
         UserDefaults.standard.string(forKey: openingKey).flatMap(Opening.init) ?? defaultOpening

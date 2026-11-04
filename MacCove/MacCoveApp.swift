@@ -11,41 +11,14 @@ import SwiftUI
 struct MacCoveApp: App {
     @Environment(\.openWindow) private var openWindow
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var hasAccessibility = AppMenuExtent.isAllowed
     @AppStorage(TerminalHook.thresholdKey) private var terminalThreshold = TerminalHook.defaultThreshold
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
-    @State private var isClipboardRestricted = ClipboardMonitor.isAccessRestricted
-    @AppStorage(NotchSettings.showInMenuBarKey) private var showsInMenuBar = true
-
-    /// Xcode runs the app to draw SwiftUI previews, which shouldn't add a menu bar item each time.
-    /// Previews in JIT mode set the playgrounds variable instead of the previews one.
-    private static let isRunningForPreviews = ["XCODE_RUNNING_FOR_PREVIEWS", "XCODE_RUNNING_FOR_PLAYGROUNDS"]
-        .contains { ProcessInfo.processInfo.environment[$0] == "1" }
 
     var body: some Scene {
         let _ = connectAppDelegate()
 
-        MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled", isInserted: Binding(
-            get: { showsInMenuBar && !Self.isRunningForPreviews },
-            set: { showsInMenuBar = $0 }
-        )) {
-            Button("Settings", systemImage: "gear") {
-                showSettings()
-            }
-            .onAppear {
-                hasAccessibility = AppMenuExtent.isAllowed
-                isClipboardRestricted = ClipboardMonitor.isAccessRestricted
-                appDelegate.calendar.refreshPermissions()
-                appDelegate.reminders.refreshPermissions()
-                appDelegate.airPods.refreshPermissions()
-            }
-            Divider()
-            Button("Quit MacCove") {
-                NSApp.terminate(nil)
-            }
-            .keyboardShortcut("q")
-        }
-        
+        // The menu bar item is AppKit's, made by AppDelegate, so it can be
+        // hidden the way System Settings hides it.
         Window("Settings", id: Self.settingsWindowID) {
             SettingsView()
                 .frame(width: 800, height: 600)
@@ -61,8 +34,12 @@ struct MacCoveApp: App {
                 .environment(appDelegate.shelf)
                 .environment(appDelegate.updates)
                 .environment(appDelegate.notchCommands)
+                .environment(appDelegate.menuBarItem)
         }
         .windowResizability(.contentSize)
+        // Opens from the menu bar item or by opening MacCove again, not at
+        // launch.
+        .defaultLaunchBehavior(.suppressed)
     }
 
     private static let settingsWindowID = "settings-window"
