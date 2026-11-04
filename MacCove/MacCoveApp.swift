@@ -30,6 +30,7 @@ struct MacCoveApp: App {
                 .environment(appDelegate.calendar)
                 .environment(appDelegate.reminders)
                 .environment(appDelegate.deviceBatteries)
+                .environment(appDelegate.mirror)
                 .environment(appDelegate.shelf)
                 .environment(appDelegate.updates)
                 .environment(appDelegate.notchCommands)
