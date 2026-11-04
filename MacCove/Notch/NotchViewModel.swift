@@ -44,6 +44,8 @@ enum IslandActivity: Hashable {
     /// A mouse, keyboard or controller running low, connecting or
     /// charging, or every device's level.
     case deviceBatteries
+    /// The camera, shown only in the notch, while Mirror is open.
+    case mirror
     /// Files dropped on the notch, or a file drag on its way to it.
     case shelf
     case nowPlaying
@@ -53,7 +55,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .shelf, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .mirror, .shelf, .nowPlaying: .zero
         }
     }
 }
@@ -113,6 +115,7 @@ final class NotchViewModel {
     let calendar: CalendarMonitor
     let reminders: RemindersMonitor
     let deviceBatteries: DeviceBatteryMonitor
+    let mirror: MirrorCamera
     let shelf: FileShelf
 
     var notchSize = CGSize(width: 186, height: 37)
@@ -198,6 +201,7 @@ final class NotchViewModel {
         calendar: CalendarMonitor,
         reminders: RemindersMonitor,
         deviceBatteries: DeviceBatteryMonitor,
+        mirror: MirrorCamera,
         shelf: FileShelf
     ) {
         self.nowPlaying = nowPlaying
@@ -212,6 +216,7 @@ final class NotchViewModel {
         self.calendar = calendar
         self.reminders = reminders
         self.deviceBatteries = deviceBatteries
+        self.mirror = mirror
         self.shelf = shelf
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
@@ -272,6 +277,15 @@ final class NotchViewModel {
         deviceBatteries.isInUse = { [weak self] in
             guard let self else { return false }
             return self.isHovering || self.presentation == .expanded
+        }
+        mirror.onEvent = { [weak self] event in
+            self?.mirrorEvent(event)
+        }
+        // Only its own pill or the mirror itself: out of sight, the camera
+        // turns off after a while.
+        mirror.isInView = { [weak self] in
+            guard let self else { return false }
+            return self.hovered == .mirror || (self.state == .expanded && self.primaryActivity == .mirror)
         }
         shelf.onEvent = { [weak self] event in
             self?.shelfEvent(event)
@@ -348,6 +362,11 @@ final class NotchViewModel {
         }
         if isShowingAll, clipboard.shown != nil {
             running.append(.clipboard)
+        }
+        // Mirror was just asked for, and the camera is on while it's open,
+        // so it leads, with its green dot in plain sight.
+        if isShowingAll, mirror.isOpen {
+            running.append(.mirror)
         }
         if isShowingAll, xcode.build != nil {
             running.append(.xcode)
@@ -496,6 +515,7 @@ final class NotchViewModel {
             case .calendar?: CalendarExpandedView.bodyHeight(for: calendar)
             case .reminders?: RemindersExpandedView.bodyHeight(for: reminders)
             case .deviceBatteries?: DeviceBatteryExpandedView.bodyHeight(for: deviceBatteries)
+            case .mirror?: MirrorExpandedView.bodyHeight
             case .shelf?: ShelfExpandedView.bodyHeight(for: shelf)
             default: BatteryExpandedView.bodyHeight
             }
@@ -740,7 +760,8 @@ final class NotchViewModel {
 
     private func canHide(_ activity: IslandActivity) -> Bool {
         switch activity {
-        case .signIn, .charging, .lowBattery: false
+        // The camera's on while it shows, so its dot stays in sight.
+        case .signIn, .charging, .lowBattery, .mirror: false
         case .claudeCode: !claude.needsAnswer
         case .shelf: shelf.dragPhase == nil
         case .xcode, .terminal, .github, .clipboard, .calendar, .reminders, .deviceBatteries, .nowPlaying: true
@@ -765,7 +786,7 @@ final class NotchViewModel {
         case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
         case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
         case .reminders: return frontID == RemindersMonitor.appBundleIdentifier
-        case .github, .clipboard, .deviceBatteries, .shelf, .signIn, .charging, .lowBattery: return false
+        case .github, .clipboard, .deviceBatteries, .mirror, .shelf, .signIn, .charging, .lowBattery: return false
         }
     }
 
@@ -867,6 +888,8 @@ final class NotchViewModel {
         if !isSigningIn {
             collapseTask?.cancel()
             alertTask?.cancel()
+            // No camera behind the lock screen.
+            mirror.close()
             isSigningIn = true
             batteryAlert = nil
             presentation = .compact
@@ -999,6 +1022,37 @@ final class NotchViewModel {
             self.deviceBatteries.leaveIfDue(after: .seconds(1.2))
         }
     }
+
+    /// Opened from its button, or closed by itself.
+    private func mirrorEvent(_ event: MirrorCamera.Event) {
+        switch event {
+        case .started: activityStarted(.mirror)
+        case .ended: activityEnded(.mirror)
+        }
+    }
+
+    /// From a meeting as it starts, or from Settings: turns the camera on
+    /// and opens it, over whatever else is open. Opened from Settings, with
+    /// the cursor elsewhere, it shrinks to the pill after a while; the
+    /// camera then turns off once it has been out of sight a minute.
+    func showMirror() {
+        guard !isSigningIn, batteryAlert == nil else { return }
+        mirror.open()
+        collapseTask?.cancel()
+        failureCollapseTask?.cancel()
+        hoverOpenTask?.cancel()
+        expandedActivity = .mirror
+        presentation = .expanded
+        failureCollapseTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.mirrorOpenDuration)
+            guard !Task.isCancelled, let self, !self.isHovering,
+                  self.presentation == .expanded, self.expandedActivity == .mirror else { return }
+            self.presentation = .compact
+        }
+    }
+
+    /// Long enough to look yourself over without the cursor on it.
+    private static let mirrorOpenDuration: Duration = .seconds(30)
 
     /// From Settings › Activities: the rest of the day, opened and then
     /// closed the way the clipboard history is.

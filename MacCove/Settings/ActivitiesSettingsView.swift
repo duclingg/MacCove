@@ -16,6 +16,7 @@ struct ActivitiesSettingsView: View {
     @Environment(CalendarMonitor.self) private var calendar
     @Environment(RemindersMonitor.self) private var reminders
     @Environment(DeviceBatteryMonitor.self) private var deviceBatteries
+    @Environment(MirrorCamera.self) private var mirror
     @Environment(FileShelf.self) private var shelf
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
     @Environment(NotchCommands.self) private var notch
@@ -120,16 +121,36 @@ struct ActivitiesSettingsView: View {
                         Text("Opens in the notch")
                     }
                 }
+                LabeledContent {
+                    if mirror.isOpen {
+                        Button("Close Mirror") {
+                            mirror.close()
+                        }
+                    } else {
+                        Button("Show Mirror") {
+                            notch.showMirror()
+                        }
+                    }
+                } label: {
+                    Text("Mirror")
+                    Text("Your camera, to check how you look before a meeting. Only on your screen, and nothing is recorded.")
+                }
+                if mirror.access == .denied {
+                    allowRow("MacCove can’t use the camera", detail: "Turn on MacCove in Privacy & Security › Camera") {
+                        MirrorCamera.openAccessSettings()
+                    }
+                }
             } header: {
                 Text("Everyday")
             } footer: {
-                Text("Turning one off stops MacCove watching for it. Calendar and Reminders ask macOS for access the first time.")
+                Text("Turning one off stops MacCove watching for it. Calendar, Reminders and Mirror ask macOS for access the first time.")
             }
         }
         .formStyle(.grouped)
         .onAppear {
             calendar.refreshPermissions()
             reminders.refreshPermissions()
+            mirror.refreshPermissions()
             isClipboardRestricted = ClipboardMonitor.isAccessRestricted
         }
     }
@@ -307,6 +328,7 @@ struct ActivitiesSettingsView: View {
         .environment(CalendarMonitor())
         .environment(RemindersMonitor())
         .environment(DeviceBatteryMonitor())
+        .environment(MirrorCamera())
         .environment(FileShelf(loadsSaved: false))
         .environment(NotchCommands())
 }

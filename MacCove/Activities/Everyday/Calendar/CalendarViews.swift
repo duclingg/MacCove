@@ -263,6 +263,9 @@ struct CalendarMinimalView: View {
 struct CalendarExpandedView: View {
     let calendar: CalendarMonitor
     let notchHeight: CGFloat
+    /// Mirror, to check your camera as a meeting starts. `nil` leaves the
+    /// button out.
+    var openMirror: (() -> Void)? = nil
 
     private static let headerHeight: CGFloat = 56
     private static let barGap: CGFloat = 10
@@ -504,7 +507,12 @@ struct CalendarExpandedView: View {
         HStack(spacing: 8) {
             chip("Dismiss") { calendar.dismiss() }
             switch activity.phase {
-            case .upcoming where event.videoLink != nil, .starting where event.videoLink != nil:
+            case .starting where event.videoLink != nil:
+                if let openMirror {
+                    chip("Mirror", action: openMirror)
+                }
+                chip("Join \(event.videoLink?.service ?? "")", background: .calendarJoin, foreground: .calendarJoinLabel) { calendar.joinMeeting() }
+            case .upcoming where event.videoLink != nil:
                 chip("Join \(event.videoLink?.service ?? "")", background: .calendarJoin, foreground: .calendarJoinLabel) { calendar.joinMeeting() }
             case .upcoming where hasPlace, .leave where hasPlace:
                 chip("Directions", background: color, foreground: labelColor(on: color)) { calendar.openDirections() }

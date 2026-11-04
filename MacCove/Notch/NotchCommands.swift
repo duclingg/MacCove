@@ -15,4 +15,5 @@ final class NotchCommands {
     @ObservationIgnored var showTodayEvents: () -> Void = {}
     @ObservationIgnored var showShelf: () -> Void = {}
     @ObservationIgnored var showDeviceBatteries: () -> Void = {}
+    @ObservationIgnored var showMirror: () -> Void = {}
 }

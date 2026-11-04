@@ -71,7 +71,8 @@ private func expanded(_ calendar: CalendarMonitor) -> some View {
         cornerRadius: NotchViewModel.expandedCornerRadius,
         isLifted: true
     ) {
-        CalendarExpandedView(calendar: calendar, notchHeight: notch.height)
+        // As the notch shows it, with Mirror as a meeting starts.
+        CalendarExpandedView(calendar: calendar, notchHeight: notch.height, openMirror: {})
     }
 }
 

@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var calendar = CalendarMonitor()
     private(set) lazy var reminders = RemindersMonitor()
     private(set) lazy var deviceBatteries = DeviceBatteryMonitor()
+    private(set) lazy var mirror = MirrorCamera()
     private(set) lazy var shelf = FileShelf()
     private(set) lazy var updates = UpdateChecker()
     /// What Settings can open in the notch.
@@ -68,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             calendar: calendar,
             reminders: reminders,
             deviceBatteries: deviceBatteries,
+            mirror: mirror,
             shelf: shelf
         )
         self.viewModel = viewModel
@@ -75,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchCommands.showTodayEvents = { [weak viewModel] in viewModel?.showTodayEvents() }
         notchCommands.showShelf = { [weak viewModel] in viewModel?.showShelf() }
         notchCommands.showDeviceBatteries = { [weak viewModel] in viewModel?.showDeviceBatteries() }
+        notchCommands.showMirror = { [weak viewModel] in viewModel?.showMirror() }
         notchController = NotchWindowController(viewModel: viewModel)
         menuBarItem.showSettings = { [weak self] in self?.showSettings?() }
         menuBarItem.onOpen = { [weak self] in

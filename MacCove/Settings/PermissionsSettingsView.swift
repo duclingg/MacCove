@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import AVFoundation
 import Contacts
 import CoreLocation
 import EventKit
@@ -140,7 +141,7 @@ private struct Permission: Identifiable {
     static func current() async -> [Permission] {
         var permissions = [accessibility()]
         permissions += await automation()
-        permissions += [calendar(), reminders(), location(), contacts(), pasteboard()]
+        permissions += [calendar(), reminders(), camera(), location(), contacts(), pasteboard()]
         if let helper = lowPowerModeHelper() {
             permissions.append(helper)
         }
@@ -263,6 +264,27 @@ private struct Permission: Identifiable {
                 detail: "Reminders needs it. Turn on MacCove under Reminders, with full access."
             ) {
                 RemindersMonitor.openAccessSettings()
+            } : nil
+        )
+    }
+
+    private static func camera() -> Permission {
+        let status: Status = switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: .allowed
+        case .notDetermined: .notAsked
+        default: .denied
+        }
+        return Permission(
+            id: "camera",
+            title: "Camera",
+            detail: "For Mirror",
+            icon: PermissionIcon(symbol: "video.fill", color: .gray),
+            status: status,
+            fix: status == .denied ? Fix(
+                title: "Camera access was denied",
+                detail: "Mirror needs it. Turn on MacCove under Camera."
+            ) {
+                MirrorCamera.openAccessSettings()
             } : nil
         )
     }
