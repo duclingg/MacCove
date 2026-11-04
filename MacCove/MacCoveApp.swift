@@ -36,6 +36,7 @@ struct MacCoveApp: App {
                 hasAccessibility = AppMenuExtent.isAllowed
                 isClipboardRestricted = ClipboardMonitor.isAccessRestricted
                 appDelegate.calendar.refreshPermissions()
+                appDelegate.reminders.refreshPermissions()
             }
             Divider()
             Button("Quit MacCove") {
@@ -53,6 +54,7 @@ struct MacCoveApp: App {
                 .environment(appDelegate.signIn)
                 .environment(appDelegate.clipboard)
                 .environment(appDelegate.calendar)
+                .environment(appDelegate.reminders)
                 .environment(appDelegate.shelf)
                 .environment(appDelegate.updates)
                 .environment(appDelegate.notchCommands)

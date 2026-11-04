@@ -140,7 +140,7 @@ private struct Permission: Identifiable {
     static func current() async -> [Permission] {
         var permissions = [accessibility()]
         permissions += await automation()
-        permissions += [calendar(), location(), contacts(), pasteboard()]
+        permissions += [calendar(), reminders(), location(), contacts(), pasteboard()]
         if let helper = lowPowerModeHelper() {
             permissions.append(helper)
         }
@@ -242,6 +242,27 @@ private struct Permission: Identifiable {
                 detail: "Next meeting needs it. Turn on MacCove under Calendars, with full access."
             ) {
                 CalendarMonitor.openAccessSettings()
+            } : nil
+        )
+    }
+
+    private static func reminders() -> Permission {
+        let status: Status = switch EKEventStore.authorizationStatus(for: .reminder) {
+        case .fullAccess: .allowed
+        case .notDetermined: .notAsked
+        default: .denied
+        }
+        return Permission(
+            id: "reminders",
+            title: "Reminders",
+            detail: "For Reminders",
+            icon: PermissionIcon(symbol: "checklist", color: .orange),
+            status: status,
+            fix: status == .denied ? Fix(
+                title: "Reminders access was denied",
+                detail: "Reminders needs it. Turn on MacCove under Reminders, with full access."
+            ) {
+                RemindersMonitor.openAccessSettings()
             } : nil
         )
     }

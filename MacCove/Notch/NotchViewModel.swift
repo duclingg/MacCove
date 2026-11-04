@@ -39,6 +39,8 @@ enum IslandActivity: Hashable {
     /// The next event from Calendar, when to leave for it, or the rest
     /// of the day.
     case calendar
+    /// A reminder that's due, or the day's list when several are.
+    case reminders
     /// Files dropped on the notch, or a file drag on its way to it.
     case shelf
     case nowPlaying
@@ -48,7 +50,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .shelf, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .reminders, .shelf, .nowPlaying: .zero
         }
     }
 }
@@ -106,6 +108,7 @@ final class NotchViewModel {
     let github: GitHubMonitor
     let clipboard: ClipboardMonitor
     let calendar: CalendarMonitor
+    let reminders: RemindersMonitor
     let shelf: FileShelf
 
     var notchSize = CGSize(width: 186, height: 37)
@@ -189,6 +192,7 @@ final class NotchViewModel {
         github: GitHubMonitor,
         clipboard: ClipboardMonitor,
         calendar: CalendarMonitor,
+        reminders: RemindersMonitor,
         shelf: FileShelf
     ) {
         self.nowPlaying = nowPlaying
@@ -201,6 +205,7 @@ final class NotchViewModel {
         self.github = github
         self.clipboard = clipboard
         self.calendar = calendar
+        self.reminders = reminders
         self.shelf = shelf
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
@@ -245,6 +250,13 @@ final class NotchViewModel {
             self?.calendarEvent(event)
         }
         calendar.isInUse = { [weak self] in
+            guard let self else { return false }
+            return self.isHovering || self.presentation == .expanded
+        }
+        reminders.onEvent = { [weak self] event in
+            self?.remindersEvent(event)
+        }
+        reminders.isInUse = { [weak self] in
             guard let self else { return false }
             return self.isHovering || self.presentation == .expanded
         }
@@ -338,6 +350,9 @@ final class NotchViewModel {
         }
         if isShowingAll, calendar.isShown {
             running.append(.calendar)
+        }
+        if isShowingAll, reminders.isShown {
+            running.append(.reminders)
         }
         // Files wait just ahead of music. A file dragged near goes ahead
         // of everything, since that's what you're doing right now.
@@ -443,6 +458,7 @@ final class NotchViewModel {
             case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
             case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
             case .calendar?: CalendarCompactView.width(for: calendar, notch: notch)
+            case .reminders?: RemindersCompactView.width(for: reminders, notch: notch)
             case .shelf?: ShelfCompactView.width(for: shelf, notch: notch)
             case .claudeCode?: Self.compactWidth(notch: notch)
             default: Self.compactWidth(notch: notch)
@@ -461,6 +477,7 @@ final class NotchViewModel {
             case .github?: GitHubExpandedView.bodyHeight(for: github)
             case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
             case .calendar?: CalendarExpandedView.bodyHeight(for: calendar)
+            case .reminders?: RemindersExpandedView.bodyHeight(for: reminders)
             case .shelf?: ShelfExpandedView.bodyHeight(for: shelf)
             default: BatteryExpandedView.bodyHeight
             }
@@ -708,14 +725,14 @@ final class NotchViewModel {
         case .signIn, .charging, .lowBattery: false
         case .claudeCode: !claude.needsAnswer
         case .shelf: shelf.dragPhase == nil
-        case .xcode, .terminal, .github, .clipboard, .calendar, .nowPlaying: true
+        case .xcode, .terminal, .github, .clipboard, .calendar, .reminders, .nowPlaying: true
         }
     }
 
     /// Whether what the activity comes from is in front: Xcode, Calendar,
-    /// the app playing, or the terminal tab a command or Claude Code runs
-    /// in. Any tab of that terminal when it can't say which. An agent
-    /// waiting for your answer stays, since its buttons answer it.
+    /// Reminders, the app playing, or the terminal tab a command or Claude
+    /// Code runs in. Any tab of that terminal when it can't say which. An
+    /// agent waiting for your answer stays, since its buttons answer it.
     private func isInFront(_ activity: IslandActivity) -> Bool {
         guard let front = frontApp, let frontID = front.bundleIdentifier else { return false }
         func isFront(_ app: String?, tty: String?) -> Bool {
@@ -729,6 +746,7 @@ final class NotchViewModel {
         case .claudeCode: return !claude.needsAnswer && isFront(claude.session?.appBundleIdentifier, tty: claude.session?.tty)
         case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
         case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
+        case .reminders: return frontID == RemindersMonitor.appBundleIdentifier
         case .github, .clipboard, .shelf, .signIn, .charging, .lowBattery: return false
         }
     }
@@ -770,6 +788,7 @@ final class NotchViewModel {
             github.leaveIfDue(after: .seconds(1.2))
             clipboard.leaveIfDue(after: .seconds(1.2))
             calendar.leaveIfDue(after: .seconds(1.2))
+            reminders.leaveIfDue(after: .seconds(1.2))
         }
     }
 
@@ -922,6 +941,15 @@ final class NotchViewModel {
         case .started: activityStarted(.calendar)
         case .timeToLeave: activityFailed(.calendar)
         case .ended: activityEnded(.calendar)
+        }
+    }
+
+    /// A reminder coming due just shows, beside the notch: Reminders says
+    /// so itself too.
+    private func remindersEvent(_ event: RemindersMonitor.Event) {
+        switch event {
+        case .started: activityStarted(.reminders)
+        case .ended: activityEnded(.reminders)
         }
     }
 
@@ -1147,6 +1175,7 @@ final class NotchViewModel {
             self.github.leaveIfDue(after: .seconds(1.2))
             self.clipboard.leaveIfDue(after: .seconds(1.2))
             self.calendar.leaveIfDue(after: .seconds(1.2))
+            self.reminders.leaveIfDue(after: .seconds(1.2))
         }
     }
 }

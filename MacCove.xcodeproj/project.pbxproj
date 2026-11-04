@@ -349,6 +349,7 @@
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "MacCove finds the AirPlay speakers and TVs on your network to show which one is playing.";
 				INFOPLIST_KEY_NSLocationUsageDescription = "MacCove works out the drive to your next event, so it can tell you when to leave.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "MacCove works out the drive to your next event, so it can tell you when to leave.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "MacCove shows your reminders in the notch when they’re due, so you can complete or snooze them there.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -391,6 +392,7 @@
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "MacCove finds the AirPlay speakers and TVs on your network to show which one is playing.";
 				INFOPLIST_KEY_NSLocationUsageDescription = "MacCove works out the drive to your next event, so it can tell you when to leave.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "MacCove works out the drive to your next event, so it can tell you when to leave.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "MacCove shows your reminders in the notch when they’re due, so you can complete or snooze them there.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

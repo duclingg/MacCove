@@ -14,6 +14,7 @@ struct ActivitiesSettingsView: View {
     @Environment(SignInMonitor.self) private var signIn
     @Environment(ClipboardMonitor.self) private var clipboard
     @Environment(CalendarMonitor.self) private var calendar
+    @Environment(RemindersMonitor.self) private var reminders
     @Environment(FileShelf.self) private var shelf
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
     @Environment(NotchCommands.self) private var notch
@@ -44,6 +45,13 @@ struct ActivitiesSettingsView: View {
                 ))
                 if calendar.isEnabled {
                     calendarOptions
+                }
+                activityToggle("Reminders", detail: remindersDetail, isOn: Binding(
+                    get: { reminders.isEnabled },
+                    set: { reminders.setEnabled($0) }
+                ))
+                if reminders.isEnabled {
+                    remindersOptions
                 }
                 activityToggle(
                     "Clipboard history",
@@ -99,12 +107,13 @@ struct ActivitiesSettingsView: View {
             } header: {
                 Text("Everyday")
             } footer: {
-                Text("Turning one off stops MacCove watching for it. Calendar asks macOS for access the first time.")
+                Text("Turning one off stops MacCove watching for it. Calendar and Reminders ask macOS for access the first time.")
             }
         }
         .formStyle(.grouped)
         .onAppear {
             calendar.refreshPermissions()
+            reminders.refreshPermissions()
             isClipboardRestricted = ClipboardMonitor.isAccessRestricted
         }
     }
@@ -170,7 +179,7 @@ struct ActivitiesSettingsView: View {
             }
         case .granted:
             if !calendar.calendars.isEmpty {
-                calendarPicker
+                picker("Calendars", choices: calendar.calendars, isIncluded: calendar.isIncluded, setIncluded: calendar.setIncluded)
             }
             LabeledContent {
                 Button("Show Today") {
@@ -198,16 +207,65 @@ struct ActivitiesSettingsView: View {
         }
     }
 
-    /// Each account's calendars, ticked when their events count.
-    private var calendarPicker: some View {
-        LabeledContent("Calendars") {
-            Menu(calendarPickerTitle) {
-                ForEach(calendarSources, id: \.self) { source in
+    // MARK: Reminders
+    private var remindersDetail: String {
+        guard reminders.isEnabled else { return "Reminders with a due time, as they come due" }
+        switch reminders.access {
+        case .notDetermined:
+            return "Asks for access to Reminders"
+        case .denied:
+            return "Needs access to Reminders"
+        case .granted:
+            let included = reminders.lists.filter { reminders.isIncluded($0) }.map(\.title)
+            guard !included.isEmpty else { return "No lists chosen" }
+            let names = included.count > 3
+                ? "\(included.prefix(3).joined(separator: ", ")) and \(included.count - 3) more"
+                : included.formatted(.list(type: .and))
+            return "\(names) · from Reminders"
+        }
+    }
+
+    /// Under Reminders while it's on: access first, then which lists count.
+    @ViewBuilder private var remindersOptions: some View {
+        switch reminders.access {
+        case .denied:
+            allowRow("MacCove can’t see your reminders", detail: "Turn on MacCove in Privacy & Security › Reminders") {
+                RemindersMonitor.openAccessSettings()
+            }
+        case .granted:
+            if !reminders.lists.isEmpty {
+                picker("Lists", choices: reminders.lists, isIncluded: reminders.isIncluded, setIncluded: reminders.setIncluded)
+            }
+        case .notDetermined:
+            EmptyView()
+        }
+    }
+
+    // MARK: Pickers
+    /// Each account's calendars or lists, ticked when they count.
+    private func picker(
+        _ label: String,
+        choices: [CalendarMonitor.CalendarChoice],
+        isIncluded: @escaping (CalendarMonitor.CalendarChoice) -> Bool,
+        setIncluded: @escaping (CalendarMonitor.CalendarChoice, Bool) -> Void
+    ) -> some View {
+        // iCloud, Google and so on, in the order the choices are sorted.
+        var seen: Set<String> = []
+        let sources = choices.map(\.source).filter { seen.insert($0).inserted }
+        let count = choices.filter(isIncluded).count
+        let title = switch count {
+        case choices.count: "All"
+        case 0: "None"
+        default: "\(count) of \(choices.count)"
+        }
+        return LabeledContent(label) {
+            Menu(title) {
+                ForEach(sources, id: \.self) { source in
                     Section(source) {
-                        ForEach(calendar.calendars.filter { $0.source == source }) { choice in
+                        ForEach(choices.filter { $0.source == source }) { choice in
                             Toggle(choice.title, isOn: Binding(
-                                get: { calendar.isIncluded(choice) },
-                                set: { calendar.setIncluded(choice, $0) }
+                                get: { isIncluded(choice) },
+                                set: { setIncluded(choice, $0) }
                             ))
                         }
                     }
@@ -215,21 +273,6 @@ struct ActivitiesSettingsView: View {
             }
             .fixedSize()
         }
-    }
-
-    private var calendarPickerTitle: String {
-        let count = calendar.calendars.filter { calendar.isIncluded($0) }.count
-        return switch count {
-        case calendar.calendars.count: "All"
-        case 0: "None"
-        default: "\(count) of \(calendar.calendars.count)"
-        }
-    }
-
-    /// iCloud, Google and so on, in the order the calendars are sorted.
-    private var calendarSources: [String] {
-        var seen: Set<String> = []
-        return calendar.calendars.map(\.source).filter { seen.insert($0).inserted }
     }
 }
 
@@ -241,6 +284,7 @@ struct ActivitiesSettingsView: View {
         .environment(SignInMonitor())
         .environment(ClipboardMonitor())
         .environment(CalendarMonitor())
+        .environment(RemindersMonitor())
         .environment(FileShelf(loadsSaved: false))
         .environment(NotchCommands())
 }

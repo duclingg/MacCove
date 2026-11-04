@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var clipboard = ClipboardMonitor()
     private(set) lazy var github = GitHubMonitor()
     private(set) lazy var calendar = CalendarMonitor()
+    private(set) lazy var reminders = RemindersMonitor()
     private(set) lazy var shelf = FileShelf()
     private(set) lazy var updates = UpdateChecker()
     /// What Settings can open in the notch.
@@ -62,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             github: github,
             clipboard: clipboard,
             calendar: calendar,
+            reminders: reminders,
             shelf: shelf
         )
         self.viewModel = viewModel
@@ -79,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             github.start()
         }
         calendar.start()
+        reminders.start()
         updates.startAutomaticChecks()
         
         // Hook events from Claude Code, by the agent they're for.
