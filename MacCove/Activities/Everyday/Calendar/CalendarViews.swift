@@ -243,7 +243,7 @@ struct CalendarMinimalView: View {
 
 /// Opened up. The event: when it is and where, when to leave or how long
 /// is left, and buttons for what to do about it. Its tile switches to the
-/// rest of the day, and back.
+/// rest of the day, and back, where each event opens in Calendar.
 struct CalendarExpandedView: View {
     let calendar: CalendarMonitor
     let notchHeight: CGFloat
@@ -317,19 +317,21 @@ struct CalendarExpandedView: View {
         }
     }
 
+    /// The tile switches between the event and the rest of the day, or,
+    /// with no event to go back to, opens Calendar.
     private func header(symbol: String, color: Color, title: String, subtitle: String, big: String?, tileLabel: String?) -> some View {
         HStack(spacing: 12) {
-            if let tileLabel {
-                Button {
+            Button {
+                if tileLabel != nil {
                     calendar.toggleToday()
-                } label: {
-                    tile(symbol: symbol, color: color)
+                } else {
+                    calendar.open(nil)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(tileLabel)
-            } else {
+            } label: {
                 tile(symbol: symbol, color: color)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(tileLabel ?? "Open Calendar")
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(title)
@@ -528,8 +530,19 @@ struct CalendarExpandedView: View {
     }
 
     /// Its calendar's colour as a stripe, what it is and where or which
-    /// calendar, and when: All day, Now, or the start time.
+    /// calendar, and when: All day, Now, or the start time. Opens the
+    /// event in Calendar.
     private func row(_ event: CalendarEvent, at now: Date) -> some View {
+        Button {
+            calendar.open(event)
+        } label: {
+            rowContent(event, at: now)
+        }
+        .buttonStyle(CalendarRowStyle())
+        .accessibilityHint("Opens in Calendar")
+    }
+
+    private func rowContent(_ event: CalendarEvent, at now: Date) -> some View {
         let color = eventTint(event)
         let isNow = !event.isAllDay && event.start <= now
 
@@ -557,6 +570,7 @@ struct CalendarExpandedView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: Self.rowHeight)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
@@ -565,5 +579,28 @@ struct CalendarExpandedView: View {
         guard let location = event.location else { return event.calendarTitle }
         guard let leaveAt = calendar.leaveAt(event) else { return location }
         return "\(location) · leave at \(clockTime(leaveAt))"
+    }
+}
+
+/// A row of the day that lights up under the cursor and as it's clicked,
+/// so it reads as something to click.
+private struct CalendarRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        CalendarRow(configuration: configuration)
+    }
+
+    private struct CalendarRow: View {
+        let configuration: ButtonStyleConfiguration
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.white.opacity(configuration.isPressed ? 0.12 : isHovered ? 0.06 : 0))
+                        .padding(.horizontal, 4)
+                )
+                .onHover { isHovered = $0 }
+        }
     }
 }
