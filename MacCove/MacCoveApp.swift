@@ -17,16 +17,14 @@ struct MacCoveApp: App {
     @State private var isClipboardRestricted = ClipboardMonitor.isAccessRestricted
     @AppStorage(NotchSettings.showInMenuBarKey) private var showsInMenuBar = true
 
-    /// Xcode runs the app to draw SwiftUI previews, which shouldn't add a
-    /// menu bar item each time. Previews in JIT mode set the playgrounds
-    /// variable instead of the previews one.
+    /// Xcode runs the app to draw SwiftUI previews, which shouldn't add a menu bar item each time.
+    /// Previews in JIT mode set the playgrounds variable instead of the previews one.
     private static let isRunningForPreviews = ["XCODE_RUNNING_FOR_PREVIEWS", "XCODE_RUNNING_FOR_PLAYGROUNDS"]
         .contains { ProcessInfo.processInfo.environment[$0] == "1" }
 
     var body: some Scene {
         let _ = connectAppDelegate()
 
-        // Hidden from General, or by dragging it out of the menu bar with ⌘.
         MenuBarExtra("MacCove", systemImage: "capsule.tophalf.filled", isInserted: Binding(
             get: { showsInMenuBar && !Self.isRunningForPreviews },
             set: { showsInMenuBar = $0 }
@@ -38,35 +36,6 @@ struct MacCoveApp: App {
                 hasAccessibility = AppMenuExtent.isAllowed
                 isClipboardRestricted = ClipboardMonitor.isAccessRestricted
                 appDelegate.calendar.refreshPermissions()
-            }
-            if !hasAccessibility {
-                Button("Allow Accessibility Access…") {
-                    AppMenuExtent.openSettings()
-                }
-            }
-            Divider()
-            // Off until asked for: copies are kept 24 hours, on this Mac
-            // only, and passwords never.
-            Toggle("Clipboard History", isOn: Binding(
-                get: { isClipboardEnabled },
-                set: { enabled in
-                    isClipboardEnabled = enabled
-                    appDelegate.setClipboardEnabled(enabled)
-                }
-            ))
-            if isClipboardEnabled {
-                if isClipboardRestricted {
-                    Button("Allow Clipboard Access…") {
-                        ClipboardMonitor.openAccessSettings()
-                    }
-                }
-                Button("Show Clipboard History") {
-                    appDelegate.showClipboardHistory()
-                }
-            }
-            Divider()
-            CalendarMenu(calendar: appDelegate.calendar) {
-                appDelegate.showTodayEvents()
             }
             Divider()
             Button("Quit MacCove") {
@@ -91,9 +60,8 @@ struct MacCoveApp: App {
 
     private static let settingsWindowID = "settings-window"
 
-    /// AppDelegate has no SwiftUI environment to open windows with, so
-    /// opening MacCove again, the way back to Settings once the menu bar
-    /// item is hidden, comes through here.
+    /// AppDelegate has no SwiftUI environment to open windows with, so opening MacCove again,
+    /// the way back to Settings once the menu bar item is hidden, comes through here.
     private func connectAppDelegate() {
         appDelegate.showSettings = showSettings
     }
