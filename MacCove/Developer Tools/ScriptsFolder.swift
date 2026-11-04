@@ -15,6 +15,7 @@ import Foundation
 /// hook without a shell.
 enum ScriptsFolder: String {
     case claudeCode = "ClaudeCode"
+    case codex = "Codex"
     case terminal = "Terminal"
     case xcode = "Xcode"
 

@@ -135,4 +135,46 @@ private func expanded(_ session: ClaudeCodeMonitor.Session) -> some View {
 #Preview("Finished, expanded") {
     expanded(session(.finished))
 }
+
+// MARK: Codex
+
+private func codex(_ phase: ClaudeCodeMonitor.Phase) -> ClaudeCodeMonitor.Session {
+    var result = session(phase, tasksDone: 2, taskCount: 4)
+    result.agent = .codex
+    result.activity = "Editing NotchWindowController.swift"
+    return result
+}
+
+private let patch: [String: Any] = [
+    "command": """
+        *** Begin Patch
+        *** Update File: MacCove/Notch/NotchWindowController.swift
+        @@
+        -        window.orderFront(nil)
+        +        if screen.hasNotch { window.orderFront(nil) }
+        *** End Patch
+        """,
+]
+
+private let codexApproval = ClaudeCodeMonitor.Approval(
+    title: ClaudeCodeMonitor.approvalTitle(tool: "apply_patch", input: patch),
+    detail: ClaudeCodeMonitor.approvalDetail(tool: "apply_patch", input: patch),
+    alwaysAllow: nil
+)
+
+#Preview("Codex working") {
+    compact(codex(.working))
+}
+
+#Preview("Codex working, expanded") {
+    expanded(codex(.working))
+}
+
+#Preview("Codex needs approval, expanded") {
+    expanded(codex(.approval(codexApproval)))
+}
+
+#Preview("Codex finished, expanded") {
+    expanded(codex(.finished))
+}
 #endif

@@ -100,7 +100,7 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
             try save(updated)
             // Nothing more comes from the sessions MacCove is showing, so
             // they'd stay as they are.
-            NotificationCenter.default.post(name: .claudeCodeHooksRemoved, object: nil)
+            NotificationCenter.default.post(name: .agentHooksRemoved, object: AITool.claude)
         } catch {
             NSApp.activate()
             NSAlert(error: error).runModal()
@@ -275,10 +275,4 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
           --data-binary @- "http://maccove/$1/$2" || exit 0
 
         """#
-}
-
-extension Notification.Name {
-    /// Posted once Remove has taken MacCove's hooks out of Claude Code's
-    /// settings. `ClaudeCodeMonitor` then lets go of its sessions.
-    static let claudeCodeHooksRemoved = Notification.Name("MacCoveClaudeCodeHooksRemoved")
 }
