@@ -46,6 +46,18 @@ struct IslandView: View {
                         viewModel.expand()
                     }
                 }
+                // Dragging across it with the mouse swipes it, as two fingers
+                // on the trackpad do: toward the centre line from where the
+                // drag started tucks it away, away from it brings one back.
+                .gesture(
+                    DragGesture(minimumDistance: 12).onEnded { value in
+                        guard let fingersX = swipeDistance(value) else { return }
+                        let startOffset = value.startLocation.x - geometry.size.width / 2
+                        let inward = startOffset == 0 || (fingersX < 0) == (startOffset > 0)
+                        viewModel.swipe(viewModel.primaryActivity, inward: inward)
+                    },
+                    including: viewModel.state == .compact ? .all : .subviews
+                )
 
             ForEach(bubbles) { bubble in
                 IslandBubbleView(bubble: bubble, viewModel: viewModel)
@@ -191,6 +203,13 @@ private struct IslandBubbleView: View {
                     .onTapGesture {
                         viewModel.expand(segment.activity)
                     }
+                    // Toward the island tucks it away; away from it brings
+                    // the last one back.
+                    .gesture(DragGesture(minimumDistance: 12).onEnded { value in
+                        guard let fingersX = swipeDistance(value) else { return }
+                        let inward = bubble.side == .trailing ? fingersX < 0 : fingersX > 0
+                        viewModel.swipe(segment.activity, inward: inward)
+                    })
                     .transition(.islandContent)
                 }
             }
@@ -254,6 +273,14 @@ private struct IslandBubbleView: View {
             EmptyView()
         }
     }
+}
+
+/// How far right a drag went, when it's far enough and mostly sideways to
+/// count as a swipe; `nil` otherwise.
+private func swipeDistance(_ value: DragGesture.Value) -> CGFloat? {
+    let x = value.translation.width
+    guard abs(x) >= NotchViewModel.swipeDistance, abs(x) > abs(value.translation.height) * 1.5 else { return nil }
+    return x
 }
 
 extension AnyTransition {

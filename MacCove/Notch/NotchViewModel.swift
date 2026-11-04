@@ -134,6 +134,10 @@ final class NotchViewModel {
     /// closes, so the next click on them reaches the one after it. Something
     /// new starting puts everything back in order.
     private var promotedActivity: IslandActivity?
+    /// Swiped into the notch, as on the iPhone: still running, but out of
+    /// sight until swiped back out or until it has something new to show.
+    /// The latest last.
+    private var hiddenActivities: [IslandActivity] = []
 
     @ObservationIgnored private var collapseTask: Task<Void, Never>?
     @ObservationIgnored private var pauseTask: Task<Void, Never>?
@@ -227,8 +231,12 @@ final class NotchViewModel {
         Array(runningActivities.dropFirst(Self.maxActivities))
     }
 
-    /// Everything running, in order.
+    /// Everything running, in order, but what's been swiped away.
     private var runningActivities: [IslandActivity] {
+        runningActivities(includingHidden: false)
+    }
+
+    private func runningActivities(includingHidden: Bool) -> [IslandActivity] {
         // A full-screen app hides everything but the lock screen, unless the
         // island was brought back on purpose.
         let isShowingAll = !isFullScreenActive || isRevealedByHover
@@ -271,6 +279,9 @@ final class NotchViewModel {
         }
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
+        }
+        if !includingHidden {
+            running.removeAll { hiddenActivities.contains($0) }
         }
         if running.count > Self.maxActivities, let promotedActivity,
            let index = running.firstIndex(of: promotedActivity), index > 1 {
@@ -459,6 +470,9 @@ final class NotchViewModel {
     /// Height of the invisible strip along the top edge that brings a
     /// tucked-away island back on screens without a notch.
     static let hoverStripHeight: CGFloat = 5
+    /// How far a drag or two fingers go sideways before it counts as a
+    /// swipe.
+    static let swipeDistance: CGFloat = 36
     /// The hardware notch's bottom corners, by eye: macOS doesn't say. Every
     /// shape uses it, so the pill, the bubbles and the open island all
     /// round off like the notch they grow out of.
@@ -551,6 +565,46 @@ final class NotchViewModel {
         alertTask?.cancel()
         expandedActivity = activity
         presentation = .expanded
+    }
+
+    /// A swipe on the pill or a bubble, or on the notch with nothing
+    /// showing, `nil` then. In toward the camera tucks that activity
+    /// away, as on the iPhone; out from it brings back the last one
+    /// tucked away. Only while closed, and never the lock screen, a
+    /// battery alert or an agent waiting for your answer.
+    func swipe(_ activity: IslandActivity?, inward: Bool) {
+        // Behind a full-screen app nothing shows, so everything would look
+        // ended and come back.
+        guard state != .expanded, !isFullScreenActive || isRevealedByHover else { return }
+        let running = runningActivities(includingHidden: true)
+        // Ones that have since ended have nothing to come back to.
+        hiddenActivities.removeAll { !running.contains($0) }
+        if inward {
+            guard let activity, canHide(activity), running.contains(activity) else { return }
+            hiddenActivities.removeAll { $0 == activity }
+            hiddenActivities.append(activity)
+            if promotedActivity == activity {
+                promotedActivity = nil
+            }
+            if hovered == activity {
+                setHovering(nil)
+            }
+        } else if !hiddenActivities.isEmpty {
+            hiddenActivities.removeLast()
+        }
+    }
+
+    private func canHide(_ activity: IslandActivity) -> Bool {
+        switch activity {
+        case .signIn, .charging, .lowBattery: false
+        case .claudeCode: !claude.needsAnswer
+        case .xcode, .terminal, .github, .clipboard, .calendar, .nowPlaying: true
+        }
+    }
+
+    /// Something new to show brings a tucked-away activity back.
+    private func unhide(_ activity: IslandActivity) {
+        hiddenActivities.removeAll { $0 == activity }
     }
 
     /// The island or bubble under the cursor, `nil` for neither.
@@ -764,6 +818,7 @@ final class NotchViewModel {
     /// does on the iPhone. Only the lock screen and a battery alert come
     /// first.
     private func activityNeedsAnswer(_ activity: IslandActivity) {
+        unhide(activity)
         guard !isSigningIn, batteryAlert == nil else { return }
         collapseTask?.cancel()
         failureCollapseTask?.cancel()
@@ -785,6 +840,7 @@ final class NotchViewModel {
     /// A failure left open gives way to whatever its activity starts next,
     /// unless the cursor is on it.
     private func activityStarted(_ activity: IslandActivity) {
+        unhide(activity)
         promotedActivity = nil
         guard expandedActivity == activity else { return }
         failureCollapseTask?.cancel()
@@ -797,6 +853,7 @@ final class NotchViewModel {
     /// keeping out of the way, then shrinks back to the pill after a while
     /// if the cursor never comes.
     private func activityFailed(_ activity: IslandActivity) {
+        unhide(activity)
         let isShowingAll = !isFullScreenActive || isRevealedByHover
         let isOtherOpen = presentation == .expanded && expandedActivity != activity
         guard !isSigningIn, batteryAlert == nil, isShowingAll, !isOtherOpen else { return }
@@ -814,6 +871,7 @@ final class NotchViewModel {
 
     /// Dismissed from its own buttons: nothing is left to keep open.
     private func activityEnded(_ activity: IslandActivity) {
+        unhide(activity)
         guard expandedActivity == activity else { return }
         failureCollapseTask?.cancel()
         collapseTask?.cancel()

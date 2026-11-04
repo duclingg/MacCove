@@ -31,6 +31,17 @@ final class NotchWindowController {
     private var fullScreenCheck: Task<Void, Never>?
     private var menuMeasurement: Task<Void, Never>?
     private var activityCount = 0
+    /// The two-finger swipe under way: where it started, measured from the
+    /// notch's centre line, what it started on, and how far it has gone.
+    private var scrollSwipe: ScrollSwipe?
+
+    private struct ScrollSwipe {
+        let activity: IslandActivity?
+        let startOffset: CGFloat
+        var distanceX: CGFloat = 0
+        var distanceY: CGFloat = 0
+        var isDone = false
+    }
 
     /// Accessibility is asked for once, the first time a bubble needs a
     /// place; after that it's up to System Settings.
@@ -67,6 +78,21 @@ final class NotchWindowController {
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: moves, handler: { [weak self] event in
             MainActor.assumeIsolated { self?.updateMouse() }
+            return event
+        }) {
+            eventMonitors.append(local)
+        }
+        // Two-finger swipes: local while the notch takes the pointer, global
+        // over an idle notch, whose clicks and scrolls go to the menu bar.
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
+            let scroll = ScrollSample(event)
+            MainActor.assumeIsolated { self?.handleScroll(scroll) }
+        }) {
+            eventMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
+            let scroll = ScrollSample(event)
+            MainActor.assumeIsolated { self?.handleScroll(scroll) }
             return event
         }) {
             eventMonitors.append(local)
@@ -232,32 +258,77 @@ final class NotchWindowController {
             }
         }
 
-        // Also reaches 1pt past the edge. Without it, a cursor parked in the
-        // topmost row would count as over the strip but not the island, so
-        // the island would keep tucking away and coming back.
-        let island = viewModel.geometry.size
-        let islandFrame = NSRect(x: screen.frame.midX - island.width / 2, y: top - island.height, width: island.width, height: island.height + 1)
-
         // An idle notch only grows under the cursor. Clicks there still go
         // through, to the menu bar.
         guard viewModel.state != .idle else {
             setReceivesMouse(false)
             viewModel.setHovering(nil)
-            viewModel.setIdleNotchHovered(viewModel.hasPhysicalNotch && islandFrame.contains(mouse))
+            viewModel.setIdleNotchHovered(viewModel.hasPhysicalNotch && islandFrame(on: screen).contains(mouse))
             return
         }
         viewModel.setIdleNotchHovered(false)
-        var hovered = islandFrame.contains(mouse) ? viewModel.primaryActivity : nil
-        if hovered == nil {
-            hovered = viewModel.bubbles.flatMap(\.segments).first { segment in
-                let frame = segment.frame
-                return NSRect(x: screen.frame.midX + frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height + 1)
-                    .contains(mouse)
-            }?.activity
-        }
-
+        let hovered = activity(at: mouse, on: screen)
         setReceivesMouse(hovered != nil)
         viewModel.setHovering(hovered)
+    }
+
+    /// Reaches 1pt past the top edge. Without it, a cursor parked in the
+    /// topmost row would count as over the strip but not the island, so
+    /// the island would keep tucking away and coming back.
+    private func islandFrame(on screen: NSScreen) -> NSRect {
+        let island = viewModel.geometry.size
+        return NSRect(x: screen.frame.midX - island.width / 2, y: screen.frame.maxY - island.height, width: island.width, height: island.height + 1)
+    }
+
+    /// The pill's activity, or a bubble's, under the cursor.
+    private func activity(at mouse: NSPoint, on screen: NSScreen) -> IslandActivity? {
+        if islandFrame(on: screen).contains(mouse) {
+            return viewModel.primaryActivity
+        }
+        let top = screen.frame.maxY
+        return viewModel.bubbles.flatMap(\.segments).first { segment in
+            let frame = segment.frame
+            return NSRect(x: screen.frame.midX + frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height + 1)
+                .contains(mouse)
+        }?.activity
+    }
+
+    /// A two-finger swipe across the pill or a bubble, as on the iPhone: in
+    /// toward the camera tucks that activity away, out from the notch brings
+    /// the last one back. Once per swipe, and only for swipes that start on
+    /// the notch, mostly sideways. The momentum after lifting doesn't count.
+    private func handleScroll(_ event: ScrollSample) {
+        guard let screen, event.isTrackpad, !event.isMomentum else { return }
+        if event.began {
+            let mouse = NSEvent.mouseLocation
+            // With nothing showing, the whole notch is somewhere to swipe
+            // out from, even when the island is tucked away above the edge.
+            let isOnIdleNotch = viewModel.state == .idle && idleSwipeFrame(on: screen).contains(mouse)
+            let target = viewModel.state == .idle ? nil : activity(at: mouse, on: screen)
+            scrollSwipe = target != nil || isOnIdleNotch
+                ? ScrollSwipe(activity: target, startOffset: mouse.x - screen.frame.midX)
+                : nil
+        }
+        if event.ended {
+            scrollSwipe = nil
+            return
+        }
+        guard var swipe = scrollSwipe, !swipe.isDone else { return }
+        swipe.distanceX += event.fingersX
+        swipe.distanceY += abs(event.deltaY)
+        if abs(swipe.distanceX) >= NotchViewModel.swipeDistance, abs(swipe.distanceX) > swipe.distanceY * 1.5 {
+            swipe.isDone = true
+            // Toward the centre line from where it started.
+            let inward = swipe.startOffset == 0 || (swipe.distanceX < 0) == (swipe.startOffset > 0)
+            viewModel.swipe(swipe.activity, inward: inward)
+        }
+        scrollSwipe = swipe
+    }
+
+    private func idleSwipeFrame(on screen: NSScreen) -> NSRect {
+        let width = NotchViewModel.compactWidth(notch: viewModel.notchSize)
+        let height = viewModel.notchSize.height
+        return NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height + 1)
     }
 
     /// This runs on every mouse move anywhere on screen, so only talk to the
@@ -266,5 +337,29 @@ final class NotchWindowController {
         if panel.ignoresMouseEvents == receives {
             panel.ignoresMouseEvents = !receives
         }
+    }
+}
+
+/// What a swipe needs from a scroll event, copied out so it can go to the
+/// main actor.
+nonisolated private struct ScrollSample: Sendable {
+    /// Trackpads and Magic Mice; a wheel's clicks have no phases to follow.
+    let isTrackpad: Bool
+    /// Still moving after the fingers lifted.
+    let isMomentum: Bool
+    let began: Bool
+    let ended: Bool
+    /// Which way the fingers went, right positive. Natural scrolling moves
+    /// the content with the fingers; otherwise the deltas run the other way.
+    let fingersX: CGFloat
+    let deltaY: CGFloat
+
+    init(_ event: NSEvent) {
+        isTrackpad = event.hasPreciseScrollingDeltas
+        isMomentum = !event.momentumPhase.isEmpty
+        began = event.phase.contains(.began)
+        ended = event.phase.contains(.ended) || event.phase.contains(.cancelled)
+        fingersX = event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX
+        deltaY = event.scrollingDeltaY
     }
 }
