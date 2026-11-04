@@ -13,4 +13,5 @@ import Observation
 final class NotchCommands {
     @ObservationIgnored var showClipboardHistory: () -> Void = {}
     @ObservationIgnored var showTodayEvents: () -> Void = {}
+    @ObservationIgnored var showShelf: () -> Void = {}
 }

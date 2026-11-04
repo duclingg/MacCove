@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) lazy var clipboard = ClipboardMonitor()
     private(set) lazy var github = GitHubMonitor()
     private(set) lazy var calendar = CalendarMonitor()
+    private(set) lazy var shelf = FileShelf()
     private(set) lazy var updates = UpdateChecker()
     /// What Settings can open in the notch.
     let notchCommands = NotchCommands()
@@ -60,11 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             claude: claude,
             github: github,
             clipboard: clipboard,
-            calendar: calendar
+            calendar: calendar,
+            shelf: shelf
         )
         self.viewModel = viewModel
         notchCommands.showClipboardHistory = { [weak viewModel] in viewModel?.showClipboardHistory() }
         notchCommands.showTodayEvents = { [weak viewModel] in viewModel?.showTodayEvents() }
+        notchCommands.showShelf = { [weak viewModel] in viewModel?.showShelf() }
         notchController = NotchWindowController(viewModel: viewModel)
         nowPlaying.start()
         battery.start()

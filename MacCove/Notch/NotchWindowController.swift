@@ -39,6 +39,13 @@ final class NotchWindowController {
     private var scrollSwipe: ScrollSwipe?
     /// Asks Terminal or iTerm which tab is in front while one of them is.
     private var frontTabCheck: Task<Void, Never>?
+    /// The drag pasteboard's change count as of the last mouse down: when
+    /// it changes during the drags after, another app has started a drag.
+    private var dragChangeCount = NSPasteboard(name: .drag).changeCount
+    /// Files are being dragged in another app, on their way to the shelf
+    /// perhaps.
+    private var isDraggingFiles = false
+    private var fileDragEnd: Task<Void, Never>?
 
     private struct ScrollSwipe {
         let activity: IslandActivity?
@@ -56,12 +63,19 @@ final class NotchWindowController {
     /// again after each of these.
     private static let menuMeasurementDelays: [Duration] = [.milliseconds(150), .milliseconds(500), .seconds(1.5)]
     private static let log = Logger(subsystem: "com.justinhoang.MacCove", category: "AppMenus")
+    /// How close to the notch a file drag comes before the pill says Drop.
+    private static let dropApproach: CGFloat = 120
+    /// How far below and beside the pill a file drag opens the notch. Held
+    /// at the top edge, a drag opens Mission Control instead, so the drop
+    /// zones have to be out before the cursor gets there.
+    private static let dropOpenReach = CGSize(width: 40, height: 60)
 
     init(viewModel: NotchViewModel) {
         self.viewModel = viewModel
 
         let hostingView = NotchHostingView(rootView: IslandView(viewModel: viewModel))
         hostingView.sizingOptions = []
+        hostingView.dropTarget = ShelfDropTarget(viewModel: viewModel)
         panel.contentView = hostingView
 
         reposition()
@@ -86,9 +100,15 @@ final class NotchWindowController {
             MainActor.assumeIsolated { self?.reposition() }
         }
 
-        let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseUp]
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateMouse() }
+        let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        // Only other apps' drags are watched for files: one out of the
+        // shelf is MacCove's own.
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self] event in
+            let type = event.type
+            MainActor.assumeIsolated {
+                self?.trackFileDrag(type)
+                self?.updateMouse()
+            }
         }) {
             eventMonitors.append(global)
         }
@@ -326,6 +346,26 @@ final class NotchWindowController {
             }
         }
 
+        // A file drag on its way: the notch takes it only while it's over
+        // the notch, so a drop anywhere else still lands where it's let go.
+        // It opens a little before the drag reaches it, then stays open
+        // while the drag is anywhere over it. Hovering waits until the drag
+        // is over.
+        if isDraggingFiles, NSEvent.pressedMouseButtons & 1 == 0 {
+            trackFileDrag(.leftMouseUp)
+        }
+        if isDraggingFiles, viewModel.acceptsFileDrops {
+            let island = islandFrame(on: screen)
+            let isOpen = viewModel.shelf.dragPhase == .over && viewModel.state == .expanded
+            let isOver = isOpen
+                ? island.contains(mouse)
+                : island.insetBy(dx: -Self.dropOpenReach.width, dy: -Self.dropOpenReach.height).contains(mouse)
+            let isNear = isOver || island.insetBy(dx: -Self.dropApproach, dy: -Self.dropApproach).contains(mouse)
+            viewModel.fileDragMoved(near: isNear, over: isOver)
+            setReceivesMouse(isOver)
+            return
+        }
+
         // An idle notch only grows under the cursor. Clicks there still go
         // through, to the menu bar.
         guard viewModel.state != .idle else {
@@ -338,6 +378,37 @@ final class NotchWindowController {
         let hovered = activity(at: mouse, on: screen)
         setReceivesMouse(hovered != nil)
         viewModel.setHovering(hovered)
+    }
+
+    /// Notices files being dragged in another app: the drag pasteboard
+    /// changes between a mouse down and the drags after it, and what's on
+    /// it is files.
+    private func trackFileDrag(_ type: NSEvent.EventType) {
+        switch type {
+        case .leftMouseDown:
+            dragChangeCount = NSPasteboard(name: .drag).changeCount
+        case .leftMouseDragged:
+            guard !isDraggingFiles else { return }
+            let pasteboard = NSPasteboard(name: .drag)
+            guard pasteboard.changeCount != dragChangeCount else { return }
+            dragChangeCount = pasteboard.changeCount
+            guard ShelfDropTarget.carriesFiles(pasteboard) else { return }
+            fileDragEnd?.cancel()
+            isDraggingFiles = true
+        case .leftMouseUp:
+            guard isDraggingFiles else { return }
+            isDraggingFiles = false
+            // A drop on the notch ends the drag itself, saying where the
+            // files went, and may come just after this: give it a moment.
+            fileDragEnd?.cancel()
+            fileDragEnd = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled, let self else { return }
+                self.viewModel.fileDragEnded(keepOpen: false)
+            }
+        default:
+            break
+        }
     }
 
     /// Reaches 1pt past the top edge. Without it, a cursor parked in the

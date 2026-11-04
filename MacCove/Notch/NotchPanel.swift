@@ -46,7 +46,38 @@ final class NotchPanel: NSPanel {
 }
 
 /// Lets the first click on the island act immediately, even though the panel
-/// is never key.
+/// is never key, and takes files dropped on the notch.
 final class NotchHostingView<Content: View>: NSHostingView<Content> {
+    /// Only the panel you use has one; the lock screen's copy takes no drops.
+    var dropTarget: ShelfDropTarget? {
+        didSet {
+            if dropTarget != nil {
+                registerForDraggedTypes(ShelfDropTarget.draggedTypes)
+            } else {
+                unregisterDraggedTypes()
+            }
+        }
+    }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        dropTarget?.entered(sender, in: self) ?? []
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        dropTarget?.updated(sender, in: self) ?? []
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        dropTarget?.exited()
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        dropTarget?.perform(sender) ?? false
+    }
+
+    override func draggingEnded(_ sender: any NSDraggingInfo) {
+        dropTarget?.ended()
+    }
 }
