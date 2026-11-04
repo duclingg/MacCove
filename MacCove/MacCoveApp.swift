@@ -53,6 +53,7 @@ struct MacCoveApp: App {
                 .environment(appDelegate.signIn)
                 .environment(appDelegate.clipboard)
                 .environment(appDelegate.calendar)
+                .environment(appDelegate.shelf)
                 .environment(appDelegate.updates)
                 .environment(appDelegate.notchCommands)
         }

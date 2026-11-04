@@ -14,6 +14,7 @@ struct ActivitiesSettingsView: View {
     @Environment(SignInMonitor.self) private var signIn
     @Environment(ClipboardMonitor.self) private var clipboard
     @Environment(CalendarMonitor.self) private var calendar
+    @Environment(FileShelf.self) private var shelf
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
     @Environment(NotchCommands.self) private var notch
     @State private var isClipboardRestricted = false
@@ -75,6 +76,24 @@ struct ActivitiesSettingsView: View {
                         detail: "Choose Always Allow in Paste from Other Apps"
                     ) {
                         ClipboardMonitor.openAccessSettings()
+                    }
+                }
+                activityToggle(
+                    "File shelf",
+                    detail: "Drag files to the notch to keep them handy, until you drag them out",
+                    isOn: Binding(
+                        get: { shelf.isEnabled },
+                        set: { shelf.setEnabled($0) }
+                    )
+                )
+                if shelf.isEnabled, !shelf.items.isEmpty {
+                    LabeledContent {
+                        Button("Show Shelf") {
+                            notch.showShelf()
+                        }
+                    } label: {
+                        Text(shelf.items.count == 1 ? "1 file on the shelf" : "\(shelf.items.count) files on the shelf")
+                        Text("Opens in the notch")
                     }
                 }
             } header: {
@@ -222,6 +241,7 @@ struct ActivitiesSettingsView: View {
         .environment(SignInMonitor())
         .environment(ClipboardMonitor())
         .environment(CalendarMonitor())
+        .environment(FileShelf(loadsSaved: false))
         .environment(NotchCommands())
 }
 #endif

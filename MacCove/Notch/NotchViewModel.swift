@@ -39,6 +39,8 @@ enum IslandActivity: Hashable {
     /// The next event from Calendar, when to leave for it, or the rest
     /// of the day.
     case calendar
+    /// Files dropped on the notch, or a file drag on its way to it.
+    case shelf
     case nowPlaying
 
     /// How long a battery alert stays; the others leave by themselves.
@@ -46,7 +48,7 @@ enum IslandActivity: Hashable {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .claudeCode, .github, .clipboard, .calendar, .shelf, .nowPlaying: .zero
         }
     }
 }
@@ -104,6 +106,7 @@ final class NotchViewModel {
     let github: GitHubMonitor
     let clipboard: ClipboardMonitor
     let calendar: CalendarMonitor
+    let shelf: FileShelf
 
     var notchSize = CGSize(width: 186, height: 37)
     var hasPhysicalNotch = true
@@ -185,7 +188,8 @@ final class NotchViewModel {
         claude: ClaudeCodeMonitor,
         github: GitHubMonitor,
         clipboard: ClipboardMonitor,
-        calendar: CalendarMonitor
+        calendar: CalendarMonitor,
+        shelf: FileShelf
     ) {
         self.nowPlaying = nowPlaying
         self.audioRoute = audioRoute
@@ -197,6 +201,7 @@ final class NotchViewModel {
         self.github = github
         self.clipboard = clipboard
         self.calendar = calendar
+        self.shelf = shelf
         isDismissedForPause = !nowPlaying.isPlaying
         nowPlaying.onPlayingChange = { [weak self] playing in
             self?.playbackChanged(playing: playing)
@@ -242,6 +247,9 @@ final class NotchViewModel {
         calendar.isInUse = { [weak self] in
             guard let self else { return false }
             return self.isHovering || self.presentation == .expanded
+        }
+        shelf.onEvent = { [weak self] event in
+            self?.shelfEvent(event)
         }
         settingsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
@@ -330,6 +338,15 @@ final class NotchViewModel {
         }
         if isShowingAll, calendar.isShown {
             running.append(.calendar)
+        }
+        // Files wait just ahead of music. A file dragged near goes ahead
+        // of everything, since that's what you're doing right now.
+        if isShowingAll, shelf.isShown {
+            if shelf.dragPhase != nil {
+                running.insert(.shelf, at: 0)
+            } else {
+                running.append(.shelf)
+            }
         }
         if isShowingAll, isNowPlayingShown {
             running.append(.nowPlaying)
@@ -426,6 +443,7 @@ final class NotchViewModel {
             case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
             case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
             case .calendar?: CalendarCompactView.width(for: calendar, notch: notch)
+            case .shelf?: ShelfCompactView.width(for: shelf, notch: notch)
             case .claudeCode?: Self.compactWidth(notch: notch)
             default: Self.compactWidth(notch: notch)
             }
@@ -443,6 +461,7 @@ final class NotchViewModel {
             case .github?: GitHubExpandedView.bodyHeight(for: github)
             case .clipboard?: ClipboardExpandedView.bodyHeight(for: clipboard)
             case .calendar?: CalendarExpandedView.bodyHeight(for: calendar)
+            case .shelf?: ShelfExpandedView.bodyHeight(for: shelf)
             default: BatteryExpandedView.bodyHeight
             }
             return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
@@ -620,6 +639,12 @@ final class NotchViewModel {
         if isStacked || overflowActivities.contains(activity) {
             promotedActivity = activity
         }
+        // Files moved or deleted since are found again, or leave, and with
+        // none left there's nothing to open.
+        if activity == .shelf, shelf.dragPhase == nil {
+            shelf.refresh()
+            guard shelf.isShown else { return }
+        }
         collapseTask?.cancel()
         alertTask?.cancel()
         hoverOpenTask?.cancel()
@@ -682,6 +707,7 @@ final class NotchViewModel {
         switch activity {
         case .signIn, .charging, .lowBattery: false
         case .claudeCode: !claude.needsAnswer
+        case .shelf: shelf.dragPhase == nil
         case .xcode, .terminal, .github, .clipboard, .calendar, .nowPlaying: true
         }
     }
@@ -703,7 +729,7 @@ final class NotchViewModel {
         case .claudeCode: return !claude.needsAnswer && isFront(claude.session?.appBundleIdentifier, tty: claude.session?.tty)
         case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
         case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
-        case .github, .clipboard, .signIn, .charging, .lowBattery: return false
+        case .github, .clipboard, .shelf, .signIn, .charging, .lowBattery: return false
         }
     }
 
@@ -936,6 +962,91 @@ final class NotchViewModel {
         }
     }
 
+    /// From Settings › Activities: opens the shelf, then shrinks back to
+    /// the pill after a while if the cursor never comes.
+    func showShelf() {
+        guard !isSigningIn, batteryAlert == nil, shelf.isShown else { return }
+        unhide(.shelf)
+        expand(.shelf)
+        failureCollapseTask?.cancel()
+        failureCollapseTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.failureOpenDuration)
+            guard !Task.isCancelled, let self, !self.isHovering,
+                  self.presentation == .expanded, self.expandedActivity == .shelf else { return }
+            self.presentation = .compact
+        }
+    }
+
+    // MARK: - Dragging files to the notch
+
+    /// Whether a file drag near the notch should open it to take the files:
+    /// not while it's showing the lock screen or a battery alert, nor
+    /// stepping aside for a full-screen app.
+    var acceptsFileDrops: Bool {
+        shelf.isEnabled && !isSigningIn && batteryAlert == nil && (!isFullScreenActive || isRevealedByHover)
+    }
+
+    /// From the window controller as a file drag moves. Near the notch, the
+    /// pill says Drop; over it, it opens to the places to drop; moving
+    /// away again closes it.
+    func fileDragMoved(near: Bool, over: Bool) {
+        guard acceptsFileDrops else { return }
+        let phase: FileShelf.DragPhase? = over ? .over : near ? .near : nil
+        guard phase != shelf.dragPhase else { return }
+        let wasOver = shelf.dragPhase == .over
+        shelf.setDragPhase(phase)
+        if phase != nil {
+            unhide(.shelf)
+        }
+        if phase == .over {
+            failureCollapseTask?.cancel()
+            expand(.shelf)
+        } else if wasOver, presentation == .expanded, expandedActivity == .shelf {
+            presentation = .compact
+        }
+    }
+
+    /// Let go, or given up. Dropped on the shelf, the notch stays open on
+    /// the files for a moment, until the cursor leaves.
+    func fileDragEnded(keepOpen: Bool) {
+        guard shelf.dragPhase != nil else { return }
+        shelf.endDrag()
+        guard presentation == .expanded, expandedActivity == .shelf else { return }
+        failureCollapseTask?.cancel()
+        guard keepOpen else {
+            presentation = .compact
+            return
+        }
+        failureCollapseTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.dropOpenDuration)
+            guard !Task.isCancelled, let self, !self.isHovering,
+                  self.presentation == .expanded, self.expandedActivity == .shelf else { return }
+            self.presentation = .compact
+        }
+    }
+
+    /// Files let go over the notch, onto the shelf or sent with AirDrop.
+    /// A promised file was saved by MacCove, so it's kept on the shelf even
+    /// when it's sent: otherwise nothing would ever clear it away.
+    func dropFiles(_ urls: [URL], to zone: FileShelf.DropZone, received: Bool = false) {
+        if zone == .shelf || received {
+            shelf.add(urls, received: received)
+        }
+        if zone == .airDrop {
+            shelf.airDrop(urls)
+        }
+    }
+
+    private func shelfEvent(_ event: FileShelf.Event) {
+        switch event {
+        case .added: unhide(.shelf)
+        case .emptied: activityEnded(.shelf)
+        }
+    }
+
+    /// How long the notch stays open on the files just dropped.
+    private static let dropOpenDuration: Duration = .seconds(2.5)
+
     /// Takes over the island, over anything else open, as an incoming call
     /// does on the iPhone. Only the lock screen and a battery alert come
     /// first.
@@ -1027,7 +1138,8 @@ final class NotchViewModel {
         guard !isHovering, presentation == .expanded || isRevealedByHover else { return }
         collapseTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled, let self, !self.isHovering, !self.isWaitingForAnswer else { return }
+            guard !Task.isCancelled, let self, !self.isHovering, !self.isWaitingForAnswer,
+                  self.shelf.dragPhase != .over else { return }
             self.presentation = .compact
             self.isRevealedByHover = false
             self.scheduleAlertDismissal(after: .seconds(1.2))

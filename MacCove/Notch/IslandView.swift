@@ -132,6 +132,9 @@ struct IslandView: View {
                 case .calendar?:
                     CalendarCompactView(calendar: viewModel.calendar, notchSize: notch)
                         .transition(.islandContent)
+                case .shelf?:
+                    ShelfCompactView(shelf: viewModel.shelf, notchSize: notch)
+                        .transition(.islandContent)
                 case .nowPlaying?:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
@@ -144,8 +147,8 @@ struct IslandView: View {
                 }
             case .expanded:
                 // Sign-in never opens, so anything but the player, a build, a
-                // command, an agent, GitHub, the clipboard or the calendar
-                // here is the battery's.
+                // command, an agent, GitHub, the clipboard, the calendar or
+                // the shelf here is the battery's.
                 switch viewModel.primaryActivity {
                 case .nowPlaying?:
                     NowPlayingExpandedView(
@@ -172,6 +175,9 @@ struct IslandView: View {
                         .transition(.islandContent)
                 case .calendar?:
                     CalendarExpandedView(calendar: viewModel.calendar, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case .shelf?:
+                    ShelfExpandedView(shelf: viewModel.shelf, notchHeight: notch.height)
                         .transition(.islandContent)
                 default:
                     BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
@@ -284,6 +290,8 @@ private struct IslandBubbleView: View {
             ClipboardMinimalView(notchSize: viewModel.notchSize)
         case .calendar:
             CalendarMinimalView(calendar: viewModel.calendar, notchSize: viewModel.notchSize)
+        case .shelf:
+            ShelfMinimalView(shelf: viewModel.shelf, notchSize: viewModel.notchSize)
         case .signIn, .charging, .lowBattery:
             // A prompt always leads, and a battery alert shows alone.
             EmptyView()
