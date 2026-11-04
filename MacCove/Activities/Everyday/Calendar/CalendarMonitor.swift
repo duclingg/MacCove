@@ -48,6 +48,11 @@ struct CalendarEvent: Identifiable, Equatable {
     /// A Zoom, Meet, Teams, Webex or FaceTime link: a meeting, which isn't
     /// shown as an event, though it still counts as what's next.
     let hasVideoLink: Bool
+    /// Repeats, so Calendar needs the occurrence's date to show this one
+    /// rather than the first.
+    var isRecurring = false
+    /// When this occurrence was due to start, even if it's been moved.
+    var occurrenceDate: Date?
 }
 
 /// Events from Calendar, as the notch shows them: minutes until the next
@@ -437,7 +442,9 @@ final class CalendarMonitor {
             color: calendar?.color.map { Color(nsColor: $0) } ?? .calendarEvent,
             isBirthday: calendar?.type == .birthday,
             birthdayContactID: event.birthdayContactIdentifier,
-            hasVideoLink: hasVideoLink
+            hasVideoLink: hasVideoLink,
+            isRecurring: event.hasRecurrenceRules,
+            occurrenceDate: event.occurrenceDate
         )
     }
 
@@ -785,14 +792,39 @@ final class CalendarMonitor {
     }
 
     func openInCalendar() {
-        let url = activity?.event.eventIdentifier?
-            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
-            .flatMap { URL(string: "ical://ekevent/\($0)?method=show&options=more") }
+        open(activity?.event)
+        dismiss()
+    }
+
+    /// The event in Calendar, from the rest of the day, or Calendar itself
+    /// without one. Calendar in front puts the notch away by itself.
+    func open(_ event: CalendarEvent?) {
         // Otherwise just Calendar.
-        if url.map({ NSWorkspace.shared.open($0) }) != true {
+        if event.flatMap(Self.calendarURL(for:)).map({ NSWorkspace.shared.open($0) }) != true {
             Self.openApp(Self.appBundleIdentifier)
         }
-        dismiss()
+    }
+
+    /// Calendar's link to the event. Every occurrence of a repeating event
+    /// shares its identifier, so the occurrence's date goes before it, or
+    /// Calendar shows the first: in UTC for a timed event, and as the time
+    /// on the clock for an all-day one, which has no time zone.
+    private static func calendarURL(for event: CalendarEvent) -> URL? {
+        guard let id = event.eventIdentifier?.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        guard event.isRecurring, let date = event.occurrenceDate else {
+            return URL(string: "ical://ekevent/\(id)?method=show&options=more")
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        if event.isAllDay {
+            formatter.timeZone = .current
+            formatter.dateFormat = "yyyyMMdd'T'HHmmss"
+        } else {
+            formatter.timeZone = TimeZone(identifier: "UTC")
+            formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        }
+        return URL(string: "ical://ekevent/\(formatter.string(from: date))/\(id)?method=show&options=more")
     }
 
     /// Messages, to the person whose birthday it is. Contacts access is
