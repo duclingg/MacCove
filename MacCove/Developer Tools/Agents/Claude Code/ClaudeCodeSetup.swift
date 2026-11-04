@@ -16,11 +16,18 @@ import AppKit
 /// a permission request, a question or a finished plan waits for MacCove's
 /// answer.
 enum ClaudeCodeSetup: AgentSetupProtocol {
-    /// Beside the Xcode scripts and the terminal hook. No spaces, so Claude
-    /// Code can run it without a shell.
     static var scriptURL: URL {
-        URL.libraryDirectory.appending(path: "Scripts/MacCove/agent-hook.sh")
+        ScriptsFolder.claudeCode.url.appending(path: "agent-hook.sh")
     }
+
+    /// Where it was before each app's scripts had a folder.
+    private static var oldScriptURL: URL {
+        ScriptsFolder.unsortedURL(of: "agent-hook.sh")
+    }
+
+    /// How a handler's command ends when it's MacCove's, now and before.
+    private static let commandSuffix = "/MacCove/ClaudeCode/agent-hook.sh"
+    private static let oldCommandSuffix = "/MacCove/agent-hook.sh"
 
     private static var settingsURL: URL {
         URL.homeDirectory.appending(path: ".claude/settings.json")
@@ -70,6 +77,8 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
             if !NSDictionary(dictionary: updated).isEqual(to: settings) {
                 try save(updated)
             }
+            // Its hooks now run the one in its folder.
+            try? FileManager.default.removeItem(at: oldScriptURL)
         } catch {
             NSApp.activate()
             NSAlert(error: error).runModal()
@@ -122,12 +131,16 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
     /// Whether Claude Code runs MacCove's hook. Quietly `false` when its
     /// settings can't be read, since this is asked every time the
     /// settings pane draws; Set Up says what's wrong.
+    /// Hooks that still run the script from before it had a folder don't
+    /// count, so Set Up shows and moves them.
     static func hooksSetup() -> Bool {
         guard let settings = try? readSettings() else { return false }
         let events = settings["hooks"] as? [String: Any] ?? [:]
         return events.values.contains { groups in
             (groups as? [[String: Any]] ?? []).contains { group in
-                (group["hooks"] as? [[String: Any]] ?? []).contains(where: isMacCoveHook)
+                (group["hooks"] as? [[String: Any]] ?? []).contains { handler in
+                    (handler["command"] as? String)?.hasSuffix(commandSuffix) == true
+                }
             }
         }
     }
@@ -168,8 +181,11 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
         try data.write(to: settingsURL, options: .atomic)
     }
 
+    /// Either script, so Set Up and Remove also take out hooks from
+    /// before it had a folder.
     private static func isMacCoveHook(_ handler: [String: Any]) -> Bool {
-        (handler["command"] as? String)?.hasSuffix("/MacCove/agent-hook.sh") == true
+        guard let command = handler["command"] as? String else { return false }
+        return command.hasSuffix(commandSuffix) || command.hasSuffix(oldCommandSuffix)
     }
 
     /// Every event's groups without MacCove's handlers, dropping groups left empty.
@@ -242,7 +258,7 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
         # Claude Code an open session still runs this. It does nothing once
         # the hook is no longer in the settings.
 
-        grep -qF '/MacCove/agent-hook.sh' "$HOME/.claude/settings.json" 2>/dev/null || exit 0
+        grep -qF '/MacCove/ClaudeCode/agent-hook.sh' "$HOME/.claude/settings.json" 2>/dev/null || exit 0
 
         socket="$HOME/Library/Application Support/MacCove/agents.sock"
         [ -S "$socket" ] || exit 0

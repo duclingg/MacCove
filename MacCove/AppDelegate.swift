@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var xcode: XcodeBuildMonitor?
     private var terminal: TerminalCommandMonitor?
     private var clipboard: ClipboardMonitor?
-    private var github: GitHubMonitor?
+    private(set) lazy var github = GitHubMonitor()
     private var agentBridge: AgentBridge?
     private(set) lazy var calendar = CalendarMonitor()
     
@@ -32,11 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let xcode = XcodeBuildMonitor()
         let terminal = TerminalCommandMonitor()
         let claude = ClaudeCodeMonitor()
-        let github = GitHubMonitor()
+        let github = self.github
         let clipboard = ClipboardMonitor()
         self.xcode = xcode
         self.terminal = terminal
-        self.github = github
         self.clipboard = clipboard
         let viewModel = NotchViewModel(
             nowPlaying: nowPlaying,
@@ -103,7 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func showGitHubSetup() {
-        guard let github else { return }
         GitHubSetup.showSetup(monitor: github)
     }
     

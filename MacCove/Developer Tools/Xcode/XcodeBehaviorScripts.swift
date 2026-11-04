@@ -37,9 +37,8 @@ enum XcodeBehaviorScripts {
         Script(fileName: "xcode-run-crashed.sh", event: "run-crashed", group: "Running", behavior: "Exits unexpectedly"),
     ]
 
-    /// The usual place for your own scripts, ~/Library/Scripts.
     static var directory: URL {
-        URL.libraryDirectory.appending(path: "Scripts/MacCove", directoryHint: .isDirectory)
+        ScriptsFolder.xcode.url
     }
 
     /// Where the first version put them, under names with spaces that
@@ -90,6 +89,25 @@ enum XcodeBehaviorScripts {
         }
     }
 
+    private static var scriptURLs: [URL] {
+        scripts.map { directory.appending(path: $0.fileName) }
+    }
+
+    /// The scripts are written, so Xcode's Behaviors can run them. MacCove
+    /// can't see which Behaviors you pointed at them.
+    static func isInstalled() -> Bool {
+        scriptURLs.allSatisfy { FileManager.default.isExecutableFile(atPath: $0.path(percentEncoded: false)) }
+    }
+
+    static var scriptCount: Int {
+        scripts.count
+    }
+
+    /// Selects the scripts in Finder.
+    static func showScripts() {
+        NSWorkspace.shared.activateFileViewerSelecting(scriptURLs)
+    }
+
     private static func install() throws -> [URL] {
         removeOldScripts()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -102,11 +120,17 @@ enum XcodeBehaviorScripts {
         }
     }
 
-    /// Only MacCove's own scripts, and their folder once it's empty.
+    /// Only MacCove's own scripts, and their folder once it's empty. The
+    /// ones written straight into ~/Library/Scripts/MacCove, before each
+    /// app had a folder, go too, so Set Up's steps point Xcode at the new
+    /// ones.
     private static func removeOldScripts() {
         let fileManager = FileManager.default
         for name in oldFileNames {
             try? fileManager.removeItem(at: oldDirectory.appending(path: name))
+        }
+        for script in scripts {
+            try? fileManager.removeItem(at: ScriptsFolder.unsortedURL(of: script.fileName))
         }
         if (try? fileManager.contentsOfDirectory(atPath: oldDirectory.path(percentEncoded: false)))?.isEmpty == true {
             try? fileManager.removeItem(at: oldDirectory)

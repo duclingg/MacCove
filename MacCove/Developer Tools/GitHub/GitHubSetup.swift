@@ -88,7 +88,7 @@ enum GitHubSetup {
         }
     }
 
-    private static func signOut(monitor: GitHubMonitor) {
+    static func signOut(monitor: GitHubMonitor) {
         GitHubKeychain.token = nil
         UserDefaults.standard.removeObject(forKey: sourceKey)
         monitor.stop()

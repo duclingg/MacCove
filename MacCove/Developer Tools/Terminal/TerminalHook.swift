@@ -21,9 +21,8 @@ enum TerminalHook {
     static let defaultThreshold = 10
     static let thresholdKey = "TerminalCommandThreshold"
 
-    /// Beside the Xcode scripts. No spaces, so it sources without quoting.
     static var directory: URL {
-        URL.libraryDirectory.appending(path: "Scripts/MacCove", directoryHint: .isDirectory)
+        ScriptsFolder.terminal.url
     }
 
     private static var hookURL: URL {
@@ -41,13 +40,24 @@ enum TerminalHook {
     }
 
     /// What MacCove adds to ~/.zshrc, and how it knows it already has.
-    private static let zshrcMarker = "MacCove/terminal-hook.zsh"
-    private static let zshrcLines = """
+    private static let zshrcMarker = "MacCove/Terminal/terminal-hook.zsh"
+    private static let hookPath = "$HOME/Library/Scripts/MacCove/Terminal/terminal-hook.zsh"
+    private static let zshrcLines = lines(loading: hookPath)
+
+    /// The same, from before each app's scripts had a folder: the hook was
+    /// straight in ~/Library/Scripts/MacCove.
+    private static let oldZshrcMarker = "MacCove/terminal-hook.zsh"
+    private static let oldHookPath = "$HOME/Library/Scripts/MacCove/terminal-hook.zsh"
+    private static let oldZshrcLines = lines(loading: oldHookPath)
+
+    private static func lines(loading path: String) -> String {
+        """
 
         # MacCove: show terminal commands that take a while in the island.
-        [[ -r "$HOME/Library/Scripts/MacCove/terminal-hook.zsh" ]] && source "$HOME/Library/Scripts/MacCove/terminal-hook.zsh"
+        [[ -r "\(path)" ]] && source "\(path)"
 
         """
+    }
 
     static var threshold: Int {
         let stored = UserDefaults.standard.integer(forKey: thresholdKey)
@@ -72,6 +82,10 @@ enum TerminalHook {
 
         let zshrc = (try? String(contentsOf: zshrcURL, encoding: .utf8)) ?? ""
         let isAdded = zshrc.contains(zshrcMarker)
+        if !isAdded, zshrc.contains(oldZshrcMarker) {
+            moveFromOldFolder(zshrc)
+            return
+        }
 
         let alert = NSAlert()
         alert.messageText = "Show Long Terminal Commands in the Island"
@@ -88,7 +102,7 @@ enum TerminalHook {
 
 
                 MacCove adds two lines to the end of ~/.zshrc to load its hook from \
-                ~/Library/Scripts/MacCove. Open a new terminal window afterwards, or run exec zsh.
+                \(ScriptsFolder.terminal.displayPath). Open a new terminal window afterwards, or run exec zsh.
 
                 Show in Terminal asks to let MacCove control Terminal or iTerm the first time.
                 """
@@ -103,6 +117,88 @@ enum TerminalHook {
         } catch {
             NSAlert(error: error).runModal()
         }
+    }
+
+    /// ~/.zshrc loads MacCove's hook from its folder. A line that still
+    /// loads it from where it was before doesn't count, so Set Up shows
+    /// and moves it.
+    static func isInstalled() -> Bool {
+        let zshrc = (try? String(contentsOf: zshrcURL, encoding: .utf8)) ?? ""
+        return zshrc.contains(zshrcMarker)
+    }
+
+    /// Points ~/.zshrc's line at the hook in its own folder, and deletes
+    /// the one straight in ~/Library/Scripts/MacCove. The hook was just
+    /// written there by `install()`.
+    private static func moveFromOldFolder(_ zshrc: String) {
+        do {
+            try backUpAndWrite(zshrc.replacingOccurrences(of: oldHookPath, with: hookPath))
+            removeOldFiles()
+        } catch {
+            NSApp.activate()
+            NSAlert(error: error).runModal()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "MacCove’s Terminal Hook Moved"
+        alert.informativeText = """
+            Its scripts now have a folder for each app, so ~/.zshrc loads the hook from \
+            \(ScriptsFolder.terminal.displayPath) instead. Your ~/.zshrc was backed up beside itself first. \
+            Open a new terminal window, or run exec zsh, to load it from there.
+            """
+        NSApp.activate()
+        alert.runModal()
+    }
+
+    /// Through any symlink, so dotfiles kept elsewhere stay linked, after
+    /// copying what was there to .zshrc.maccove-backup beside it.
+    private static func backUpAndWrite(_ zshrc: String) throws {
+        let fileManager = FileManager.default
+        let url = zshrcURL.resolvingSymlinksInPath()
+        let backupURL = url.deletingLastPathComponent().appending(path: url.lastPathComponent + ".maccove-backup")
+        try? fileManager.removeItem(at: backupURL)
+        try fileManager.copyItem(at: url, to: backupURL)
+        try zshrc.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private static func removeOldFiles() {
+        for name in ["terminal-hook.zsh", "terminal-threshold"] {
+            try? FileManager.default.removeItem(at: ScriptsFolder.unsortedURL(of: name))
+        }
+    }
+
+    /// Takes out what Set Up added to ~/.zshrc, after backing it up beside
+    /// itself, and deletes the hook. Shells already open have the hook
+    /// loaded, but it stops reporting once its file is gone.
+    static func remove() {
+        let fileManager = FileManager.default
+        do {
+            if let zshrc = try? String(contentsOf: zshrcURL.resolvingSymlinksInPath(), encoding: .utf8),
+               zshrc.contains(zshrcMarker) || zshrc.contains(oldZshrcMarker) {
+                try backUpAndWrite(removingLines(from: zshrc))
+            }
+            try? fileManager.removeItem(at: hookURL)
+            try? fileManager.removeItem(at: thresholdURL)
+            try? fileManager.removeItem(at: directory)
+            removeOldFiles()
+        } catch {
+            NSApp.activate()
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    /// What Set Up appended, exactly; or, if it's been edited since, any
+    /// line that loads the hook and the comment above it.
+    private static func removingLines(from zshrc: String) -> String {
+        let exact = zshrc
+            .replacingOccurrences(of: zshrcLines, with: "")
+            .replacingOccurrences(of: oldZshrcLines, with: "")
+        guard exact.contains(zshrcMarker) || exact.contains(oldZshrcMarker) else { return exact }
+        let comment = zshrcLines.split(separator: "\n").first.map(String.init) ?? ""
+        return exact
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.contains(zshrcMarker) && !$0.contains(oldZshrcMarker) && $0 != comment }
+            .joined(separator: "\n")
     }
 
     private static func install() throws {
@@ -139,7 +235,8 @@ enum TerminalHook {
         zmodload zsh/datetime 2>/dev/null || return 0
         autoload -Uz add-zsh-hook
 
-        typeset -g _maccove_threshold_file="$HOME/Library/Scripts/MacCove/terminal-threshold"
+        typeset -g _maccove_hook_file="$HOME/Library/Scripts/MacCove/Terminal/terminal-hook.zsh"
+        typeset -g _maccove_threshold_file="$HOME/Library/Scripts/MacCove/Terminal/terminal-threshold"
         typeset -g _maccove_id= _maccove_cmd= _maccove_dir= _maccove_start= _maccove_timer=
         typeset -g _maccove_threshold=10
 
@@ -158,8 +255,10 @@ enum TerminalHook {
         }
 
         # Only when MacCove is running, and in the background with -g, so the
-        # terminal stays in front.
+        # terminal stays in front. Not once Remove has deleted this file, so
+        # shells that loaded it earlier stop reporting too.
         _maccove_send() {
+          [[ -r $_maccove_hook_file ]] || return 0
           pgrep -xq MacCove || return 0
           open -g "maccove://terminal/$1?id=$_maccove_id&pid=$$&start=$_maccove_start&app=${__CFBundleIdentifier:-}&tty=$(_maccove_encode "${TTY:-}")&dir=$(_maccove_encode "$_maccove_dir")&cmd=$(_maccove_encode "${_maccove_cmd[1,300]}")$2"
         }

@@ -14,9 +14,6 @@ struct MacCoveApp: App {
     @State private var hasAccessibility = AppMenuExtent.isAllowed
     @AppStorage(TerminalHook.thresholdKey) private var terminalThreshold = TerminalHook.defaultThreshold
     @AppStorage(ClipboardMonitor.enabledKey) private var isClipboardEnabled = false
-    @AppStorage(GitHubSetup.sourceKey) private var githubSource = ""
-    /// Copies don't show, or ask every time, once macOS restricts reading
-    /// the clipboard.
     @State private var isClipboardRestricted = ClipboardMonitor.isAccessRestricted
 
     /// Xcode runs the app to draw SwiftUI previews, which shouldn't add a
@@ -35,30 +32,9 @@ struct MacCoveApp: App {
                 isClipboardRestricted = ClipboardMonitor.isAccessRestricted
                 appDelegate.calendar.refreshPermissions()
             }
-            
-            Button("Set Up Xcode Builds…") {
-                XcodeBehaviorScripts.showSetup()
-            }
-            Button("Set Up Terminal Commands…") {
-                TerminalHook.showSetup()
-            }
-            Button(githubSource.isEmpty ? "Connect GitHub…" : "GitHub Pull Requests…") {
-                appDelegate.showGitHubSetup()
-            }
             if !hasAccessibility {
                 Button("Allow Accessibility Access…") {
                     AppMenuExtent.openSettings()
-                }
-            }
-            Picker("Show Terminal Commands After", selection: Binding(
-                get: { terminalThreshold },
-                set: { seconds in
-                    terminalThreshold = seconds
-                    TerminalHook.setThreshold(seconds)
-                }
-            )) {
-                ForEach(TerminalHook.thresholdOptions, id: \.self) { seconds in
-                    Text(seconds < 60 ? "\(seconds) Seconds" : "\(seconds / 60) Minute").tag(seconds)
                 }
             }
             Divider()
@@ -95,16 +71,13 @@ struct MacCoveApp: App {
         Window("Settings", id: Self.settingsWindowID) {
             SettingsView()
                 .frame(width: 800, height: 600)
+                .environment(appDelegate.github)
         }
         .windowResizability(.contentSize)
     }
 
     private static let settingsWindowID = "settings-window"
-
-    /// Opens Settings, or brings it back, in front of every app's windows.
-    /// MacCove has no Dock icon, so a window it opens stays behind the app
-    /// in front unless MacCove asks to come forward, and SwiftUI only makes
-    /// the window after `openWindow` returns.
+    
     private func showSettings() {
         openWindow(id: Self.settingsWindowID)
         Task { @MainActor in
