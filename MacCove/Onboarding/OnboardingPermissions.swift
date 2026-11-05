@@ -64,6 +64,17 @@ final class LocalNetworkProbe {
     /// when nothing came back in time.
     private(set) var access: OnboardingAccess = .notAsked
 
+    /// Every change goes through here, so Allowed always closes the guide,
+    /// however it was found.
+    private func set(_ access: OnboardingAccess) {
+        if self.access != access {
+            self.access = access
+        }
+        if access == .allowed {
+            guideSawAllowed()
+        }
+    }
+
     @ObservationIgnored private var browser: NWBrowser?
     /// What the search said last, and the wait to see that it holds.
     @ObservationIgnored private var heard: Heard = .nothing
@@ -77,9 +88,6 @@ final class LocalNetworkProbe {
         case refused
     }
     @ObservationIgnored private var timeout: Task<Void, Never>?
-    /// Allow was clicked: if it turns out to be off, Privacy & Security
-    /// opens with the steps to turn it on.
-    @ObservationIgnored private var turnsOnWhenRefused = false
     @ObservationIgnored private var watch: Task<Void, Never>?
 
     static let guideID = "local-network"
@@ -101,11 +109,14 @@ final class LocalNetworkProbe {
 
     /// Allow: macOS asks if it never has; otherwise this finds out what
     /// it was told.
+    /// Allow: straight to Privacy & Security with the steps, whatever
+    /// the answer was, since macOS asks only once and a reset doesn't ask
+    /// again. Checking while it's open brings up macOS's own prompt on a Mac
+    /// that's never been asked.
     func ask() {
         // From now on the AirPlay speakers are looked for from launch.
         UserDefaults.standard.set(true, forKey: AirPlayDeviceDirectory.hasBrowsedKey)
-        turnsOnWhenRefused = true
-        check()
+        turnOn()
     }
 
     /// Off already, and macOS won't ask again: opens Privacy & Security,
@@ -113,6 +124,11 @@ final class LocalNetworkProbe {
     /// two clicks guided. It keeps checking quietly, and ticks off once
     /// MacCove's switch is on.
     func turnOn() {
+        // Already on: nothing to guide.
+        guard access != .allowed else { return }
+        if access == .notAsked {
+            set(.asking)
+        }
         let guides = NotchGuides.shared
         guides.show(NotchGuide(
             id: Self.guideID,
@@ -134,13 +150,13 @@ final class LocalNetworkProbe {
         Self.openSettings()
         watch?.cancel()
         watch = Task { [weak self] in
-            // Up to five minutes, checking every few seconds without the
-            // row changing while it does.
+            // Up to five minutes, checking straight away and then every few
+            // seconds, without the row changing while it does.
             for _ in 0..<100 {
-                try? await Task.sleep(for: .seconds(3))
                 guard !Task.isCancelled, let self, guides.isShowing(Self.guideID) else { return }
                 guard self.access != .allowed else { return }
                 self.check(quiet: true)
+                try? await Task.sleep(for: .seconds(3))
             }
         }
     }
@@ -156,8 +172,9 @@ final class LocalNetworkProbe {
             guide.subtitle = "AirPlay speakers show with the right icon"
         }
         watch?.cancel()
+        // Long enough to see it ticked off, then it goes.
         Task {
-            try? await Task.sleep(for: .seconds(2.5))
+            try? await Task.sleep(for: .seconds(3))
             guides.finish(Self.guideID)
         }
     }
@@ -166,7 +183,7 @@ final class LocalNetworkProbe {
     private func check(quiet: Bool = false) {
         stop()
         if !quiet {
-            access = .asking
+            set(.asking)
         }
         let browser = NWBrowser(for: .bonjour(type: Self.serviceType, domain: nil), using: .tcp)
         browser.stateUpdateHandler = { [weak self] state in
@@ -209,7 +226,7 @@ final class LocalNetworkProbe {
             try? await Task.sleep(for: .seconds(90))
             guard !Task.isCancelled, let self else { return }
             if self.access == .asking {
-                self.access = .asked
+                self.set(.asked)
             }
             self.stop()
         }
@@ -217,7 +234,7 @@ final class LocalNetworkProbe {
 
     private func couldNotCheck() {
         if access == .asking {
-            access = .asked
+            set(.asked)
         }
         stop()
     }
@@ -241,24 +258,12 @@ final class LocalNetworkProbe {
     }
 
     private func refused() {
-        if access != .denied {
-            access = .denied
-        }
-        if turnsOnWhenRefused {
-            turnsOnWhenRefused = false
-            turnOn()
-        }
+        set(.denied)
     }
 
     private func finish(_ access: OnboardingAccess) {
-        if self.access != access {
-            self.access = access
-        }
-        turnsOnWhenRefused = false
         stop()
-        if access == .allowed {
-            guideSawAllowed()
-        }
+        set(access)
     }
 
     func stop() {

@@ -70,8 +70,9 @@ final class OnboardingModel {
     /// Folded to the pill at the top edge, on a display without a notch,
     /// before it slides away.
     private(set) var isPill = false
-    /// Done was clicked: folding away, at the pill's width.
-    private(set) var isFolding = false
+    /// The pill has slid up past the top edge, all of it at once and in
+    /// its own shape.
+    private(set) var isSlidAway = false
     /// Whether the notch has something to show, or always shows its pill,
     /// to take over from the welcome's at the end.
     @ObservationIgnored var notchHasActivities: () -> Bool = { false }
@@ -363,7 +364,6 @@ final class OnboardingModel {
         // activities show, and stays there a moment so you see where. Then
         // the notch takes over if it has something to show; otherwise the
         // pill slides up out of sight.
-        isFolding = true
         withAnimation(.island) {
             isPill = true
             isOpen = false
@@ -373,7 +373,7 @@ final class OnboardingModel {
             guard let self else { return }
             if !self.notchHasActivities() {
                 withAnimation(.islandSlide) {
-                    self.isPill = false
+                    self.isSlidAway = true
                 }
                 try? await Task.sleep(for: .milliseconds(450))
             }
@@ -455,16 +455,24 @@ final class OnboardingModel {
     /// Find AirPlay speakers: macOS asks if it never has. If it was turned
     /// off, Privacy & Security opens with the steps, and the card stays
     /// lowered beneath it while it's up.
+    /// Find AirPlay speakers: Privacy & Security opens with the steps, and
+    /// the card steps below it. It comes back in front and in focus the
+    /// moment Local Network is on, with System Settings still open, or if
+    /// you leave System Settings, or the guide's closed.
     func allowNetwork() {
         network.ask()
         whileAsking { [weak self] in
-            // Up to five seconds for an answer, or for System Settings.
-            for _ in 0..<20 {
-                if SystemSettings.isInFront || self?.network.access != .asking { break }
-                try? await Task.sleep(for: .milliseconds(250))
-            }
+            guard let self else { return }
+            var wasInFront = false
+            // Up to five minutes.
             for _ in 0..<600 {
-                guard SystemSettings.isInFront else { return }
+                if self.network.access == .allowed { return }
+                if !NotchGuides.shared.isShowing(LocalNetworkProbe.guideID) { return }
+                if SystemSettings.isInFront {
+                    wasInFront = true
+                } else if wasInFront {
+                    return
+                }
                 try? await Task.sleep(for: .milliseconds(500))
             }
         }
@@ -546,6 +554,31 @@ final class OnboardingModel {
     }
 
     // MARK: Asked for from the tiles
+
+    /// Next meeting: turning it on asks for Calendar. The card waits below
+    /// macOS's prompt for the answer, then takes focus back.
+    func allowCalendar() {
+        let calendar = calendar
+        whileAsking {
+            calendar.setEnabled(true)
+            // Up to a minute for an answer.
+            for _ in 0..<120 {
+                if calendar.access != .notDetermined { return }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+
+    func allowReminders() {
+        let reminders = reminders
+        whileAsking {
+            reminders.setEnabled(true)
+            for _ in 0..<120 {
+                if reminders.access != .notDetermined { return }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
 
     /// Mirror's camera, asked for now rather than the first time it opens.
     func allowCamera() {

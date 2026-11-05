@@ -48,10 +48,6 @@ struct OnboardingView: View {
         if model.hasNotch || model.isPill {
             return model.notchSize
         }
-        // Sliding up out of sight from the pill, rather than widening.
-        if model.isFolding {
-            return CGSize(width: model.notchSize.width, height: 0)
-        }
         return CGSize(width: model.step.width * 0.6, height: 0)
     }
 
@@ -115,8 +111,12 @@ struct OnboardingView: View {
                 .padding(.horizontal, -IslandShape.earWidth)
                 .shadow(color: .black.opacity(model.isOpen ? 0.45 : 0), radius: 32, y: 24)
                 // With no notch to grow from, even the ears wait to drop.
-                .opacity(model.isOpen || model.hasNotch || model.isPill || model.isFolding ? 1 : 0)
+                .opacity(model.isOpen || model.hasNotch || model.isPill ? 1 : 0)
         }
+        // At the end without a notch, the pill leaves by sliding up past
+        // the top edge whole, rather than shrinking, which would flatten
+        // its corners ahead of its middle.
+        .offset(y: model.isSlidAway ? -(closedSize.height + IslandShape.earWidth + 4) : 0)
         .animation(.island, value: model.isOpen)
         .onGeometryChange(for: CGRect.self) { proxy in
             proxy.frame(in: .global)

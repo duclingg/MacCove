@@ -389,9 +389,9 @@ private struct AccessStep: View {
                     symbol: "airplayaudio",
                     color: .blue
                 ) {
-                    if model.network.access == .asked {
+                    if model.network.access == .asked || model.network.access == .denied {
                         Button("Turn On") {
-                            model.openSystemSettings { LocalNetworkProbe.shared.turnOn() }
+                            model.allowNetwork()
                         }
                             .buttonStyle(OnboardingButtonStyle(kind: .row))
                     } else {
@@ -547,12 +547,12 @@ private struct ConnectStep: View {
             Tile(
                 id: "calendar", name: "Next meeting", detail: "Join calls from the notch",
                 icon: .symbol("calendar", .blue),
-                trailing: eventKit(isEnabled: model.calendar.isEnabled, access: model.calendar.access, enable: { model.calendar.setEnabled(true) }, openSettings: CalendarMonitor.openAccessSettings)
+                trailing: eventKit(isEnabled: model.calendar.isEnabled, access: model.calendar.access, enable: model.allowCalendar, openSettings: CalendarMonitor.openAccessSettings)
             ),
             Tile(
                 id: "reminders", name: "Reminders", detail: "Ones with a due time, as they come due",
                 icon: .symbol("checklist", .orange),
-                trailing: eventKit(isEnabled: model.reminders.isEnabled, access: model.reminders.access, enable: { model.reminders.setEnabled(true) }, openSettings: RemindersMonitor.openAccessSettings)
+                trailing: eventKit(isEnabled: model.reminders.isEnabled, access: model.reminders.access, enable: model.allowReminders, openSettings: RemindersMonitor.openAccessSettings)
             ),
             Tile(
                 id: "shelf", name: "File shelf", detail: "Drop files on the notch to keep them",

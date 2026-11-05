@@ -89,12 +89,28 @@ final class OnboardingWindowController {
         focus()
     }
 
-    /// In front and in focus: MacCove active again, after a prompt or
-    /// System Settings took it, with the card taking Return and Esc.
+    /// After a macOS prompt is answered, focus goes back to whatever had it
+    /// a moment later, so the card takes it again then too.
+    private func refocus() {
+        focus()
+        Task { @MainActor [weak self] in
+            for delay in [300, 700] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard let self, self.askingCount == 0, self.model.isOpen else { return }
+                if !self.panel.isKeyWindow {
+                    self.focus()
+                }
+            }
+        }
+    }
+
+    /// In front and in focus after a prompt or System Settings took it:
+    /// the key window, with its switches active and Return and Esc going
+    /// to it, which a non-activating panel can be without MacCove itself
+    /// being active.
     private func focus() {
-        NSApp.activate()
         panel.orderFrontRegardless()
-        panel.makeKeyAndOrderFront(nil)
+        panel.makeKey()
     }
 
     private func close() {
@@ -155,7 +171,7 @@ final class OnboardingWindowController {
             self.askingCount -= 1
             if self.askingCount == 0 {
                 self.panel.level = Self.level
-                self.focus()
+                self.refocus()
             }
         }
     }
@@ -167,10 +183,12 @@ final class OnboardingPanel: NSPanel {
     init() {
         super.init(
             contentRect: .zero,
-            // Not non-activating, unlike the notch: clicking the welcome
-            // makes MacCove the active app, which it has to be to bring
-            // System Settings forward for a permission.
-            styleMask: [.borderless],
+            // Non-activating, so it can take the keyboard, and draw its
+            // switches as active, whichever app is in front: macOS doesn't
+            // always let MacCove become active again after a prompt or
+            // System Settings. Opening System Settings asks to activate
+            // MacCove at the click, which is when it needs to be.
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
