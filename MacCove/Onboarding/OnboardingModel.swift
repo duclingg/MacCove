@@ -156,6 +156,11 @@ final class OnboardingModel {
 
     /// Runs while macOS asks for something, with the card lowered beneath
     /// macOS's prompt until it's done.
+    /// Runs while System Settings is up, with the card below it, since
+    /// System Settings is an ordinary window.
+    @ObservationIgnored var whileInSystemSettings: (_ work: @escaping @MainActor () async -> Void) -> Void = { work in
+        Task { await work() }
+    }
     @ObservationIgnored var whileAsking: (_ work: @escaping @MainActor () async -> Void) -> Void = { work in
         Task { await work() }
     }
@@ -465,7 +470,7 @@ final class OnboardingModel {
     /// you leave System Settings, or the guide's closed.
     func allowNetwork() {
         network.ask()
-        whileAsking { [weak self] in
+        whileInSystemSettings { [weak self] in
             guard let self else { return }
             var wasInFront = false
             // Up to five minutes.
@@ -485,7 +490,7 @@ final class OnboardingModel {
     /// Opens System Settings with the card lowered beneath it for as long
     /// as it's in front, so the card never covers it.
     func openSystemSettings(_ open: @escaping () -> Void) {
-        whileAsking {
+        whileInSystemSettings {
             open()
             // A moment for it to come forward.
             try? await Task.sleep(for: .seconds(1))
@@ -565,8 +570,10 @@ final class OnboardingModel {
         let calendar = calendar
         whileAsking {
             calendar.setEnabled(true)
-            // Up to a minute for an answer.
+            // Up to a minute for an answer, read from macOS each time
+            // rather than trusting the first read after it.
             for _ in 0..<120 {
+                calendar.refreshPermissions()
                 if calendar.access != .notDetermined { return }
                 try? await Task.sleep(for: .milliseconds(500))
             }
@@ -578,6 +585,7 @@ final class OnboardingModel {
         whileAsking {
             reminders.setEnabled(true)
             for _ in 0..<120 {
+                reminders.refreshPermissions()
                 if reminders.access != .notDetermined { return }
                 try? await Task.sleep(for: .milliseconds(500))
             }

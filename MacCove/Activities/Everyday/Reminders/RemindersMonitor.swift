@@ -215,6 +215,12 @@ final class RemindersMonitor {
             Task { @MainActor in
                 guard let self, self.isEnabled else { return }
                 self.refreshPermissions()
+                // The status can lag the answer by a moment: read it again
+                // rather than stay Not Asked.
+                for _ in 0..<6 where self.access == .notDetermined {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    self.refreshPermissions()
+                }
             }
         }
     }

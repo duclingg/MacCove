@@ -38,7 +38,10 @@ final class OnboardingWindowController {
         panel.contentView = hostingView
 
         model.whileAsking = { [weak self] work in
-            self?.runWhileAsking(work)
+            self?.runLowered(to: Self.belowPrompts, work)
+        }
+        model.whileInSystemSettings = { [weak self] work in
+            self?.runLowered(to: .normal, work)
         }
         model.locateMenuItem = { [weak self] in
             self?.menuItemPoint()
@@ -162,9 +165,18 @@ final class OnboardingWindowController {
     /// macOS's permission prompts are its own windows, which the card above
     /// the menu bar could cover. It goes down to the level of other windows
     /// until each is answered.
-    private func runWhileAsking(_ work: @escaping @MainActor () async -> Void) {
+    /// For macOS's prompts: still above other apps' windows, so it isn't
+    /// left behind them, but below the prompt and alerts.
+    private static let belowPrompts = NSWindow.Level.floating
+
+    /// Down to `level` while `work` goes on, then back on top and in focus.
+    /// For System Settings, an ordinary window, that's `.normal`; for a
+    /// prompt, just below it.
+    private func runLowered(to level: NSWindow.Level, _ work: @escaping @MainActor () async -> Void) {
         askingCount += 1
-        panel.level = .normal
+        if askingCount == 1 || level.rawValue < panel.level.rawValue {
+            panel.level = level
+        }
         Task { @MainActor [weak self] in
             await work()
             guard let self else { return }
