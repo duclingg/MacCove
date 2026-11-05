@@ -371,13 +371,11 @@ final class CalendarMonitor {
     }
 
     static func openAccessSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Calendars") else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy("Privacy_Calendars")
     }
 
     static func openLocationSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_LocationServices") else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy("Privacy_LocationServices")
     }
 
     private func begin() {

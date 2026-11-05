@@ -177,8 +177,7 @@ final class MirrorCamera {
     }
 
     static func openAccessSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Camera") else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy("Privacy_Camera")
     }
 }
 

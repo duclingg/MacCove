@@ -58,20 +58,13 @@ enum InstallLocation: Equatable {
     /// Copies MacCove into Applications, or ~/Applications when that isn't
     /// yours to write to, then opens the copy and quits this one. A
     /// MacCove already there goes to the Trash first, so it can be got
-    /// back.
-    static func copyToApplicationsAndRelaunch() throws {
-        let fileManager = FileManager.default
+    /// back. Copying takes a moment, so it's done off the main thread
+    /// while the button spins.
+    static func copyToApplicationsAndRelaunch() async throws {
         let source = Bundle.main.bundleURL
-        var folder = URL(filePath: "/Applications", directoryHint: .isDirectory)
-        if !fileManager.isWritableFile(atPath: folder.path(percentEncoded: false)) {
-            folder = URL.homeDirectory.appending(path: "Applications", directoryHint: .isDirectory)
-            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-        }
-        let destination = folder.appending(path: source.lastPathComponent)
-        if fileManager.fileExists(atPath: destination.path(percentEncoded: false)) {
-            try fileManager.trashItem(at: destination, resultingItemURL: nil)
-        }
-        try fileManager.copyItem(at: source, to: destination)
+        let destination = try await Task.detached {
+            try copy(source)
+        }.value
 
         // Opened once this one has quit, so the two never both hold the
         // agent socket. The shell outlives MacCove.
@@ -82,14 +75,51 @@ enum InstallLocation: Equatable {
         NSApp.terminate(nil)
     }
 
+    nonisolated private static func copy(_ source: URL) throws -> URL {
+        let fileManager = FileManager.default
+        var folder = URL(filePath: "/Applications", directoryHint: .isDirectory)
+        if !fileManager.isWritableFile(atPath: folder.path(percentEncoded: false)) {
+            folder = URL.homeDirectory.appending(path: "Applications", directoryHint: .isDirectory)
+            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        let destination = folder.appending(path: source.lastPathComponent)
+        if fileManager.fileExists(atPath: destination.path(percentEncoded: false)) {
+            try fileManager.trashItem(at: destination, resultingItemURL: nil)
+        }
+        try fileManager.copyItem(at: source, to: destination)
+        return destination
+    }
+
     // MARK: - Cleaning up
 
     /// Ejects the disk image, then moves the .dmg to the Trash rather than
-    /// deleting it, so it can be got back.
-    static func cleanUp(volume: URL, image: URL?) throws {
-        try NSWorkspace.shared.unmountAndEjectDevice(at: volume)
-        if let image, FileManager.default.fileExists(atPath: image.path(percentEncoded: false)) {
-            try FileManager.default.trashItem(at: image, resultingItemURL: nil)
+    /// deleting it, so it can be got back. Ejecting can take a few seconds,
+    /// so it's off the main thread too.
+    static func cleanUp(volume: URL, image: URL?) async throws {
+        try await Task.detached {
+            try eject(volume)
+            if let image, FileManager.default.fileExists(atPath: image.path(percentEncoded: false)) {
+                try FileManager.default.trashItem(at: image, resultingItemURL: nil)
+            }
+        }.value
+    }
+
+    /// `hdiutil detach`, which says why when something's still using it.
+    nonisolated private static func eject(_ volume: URL) throws {
+        let process = Process()
+        process.executableURL = URL(filePath: "/usr/bin/hdiutil")
+        process.arguments = ["detach", volume.path(percentEncoded: false)]
+        let errors = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = errors
+        try process.run()
+        let message = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let reason = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw CocoaError(.fileWriteUnknown, userInfo: [
+                NSLocalizedDescriptionKey: reason.isEmpty ? "The disk image is still in use. Close its window, then try again." : reason,
+            ])
         }
     }
 

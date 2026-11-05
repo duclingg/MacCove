@@ -147,6 +147,9 @@ struct IslandView: View {
                 case .shelf?:
                     ShelfCompactView(shelf: viewModel.shelf, notchSize: notch)
                         .transition(.islandContent)
+                case .guide?:
+                    NotchGuideCompactView(guides: viewModel.guides, notchSize: notch)
+                        .transition(.islandContent)
                 case .nowPlaying?:
                     NowPlayingCompactView(
                         nowPlaying: nowPlaying,
@@ -205,6 +208,9 @@ struct IslandView: View {
                         .transition(.islandContent)
                 case .shelf?:
                     ShelfExpandedView(shelf: viewModel.shelf, notchHeight: notch.height)
+                        .transition(.islandContent)
+                case .guide?:
+                    NotchGuideExpandedView(guides: viewModel.guides, notchHeight: notch.height)
                         .transition(.islandContent)
                 default:
                     BatteryExpandedView(battery: viewModel.battery, notchHeight: notch.height)
@@ -327,6 +333,8 @@ private struct IslandBubbleView: View {
             MirrorMinimalView(notchSize: viewModel.notchSize)
         case .shelf:
             ShelfMinimalView(shelf: viewModel.shelf, notchSize: viewModel.notchSize)
+        case .guide:
+            NotchGuideMinimalView(guides: viewModel.guides, notchSize: viewModel.notchSize)
         case .signIn, .charging, .lowBattery:
             // A prompt always leads, and a battery alert shows alone.
             EmptyView()

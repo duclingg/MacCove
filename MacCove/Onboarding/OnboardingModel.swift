@@ -67,9 +67,19 @@ final class OnboardingModel {
     private(set) var step: Step
     /// Dropped out of the notch. False while it drops and folds back.
     var isOpen = false
+    /// Folded to the pill at the top edge, on a display without a notch,
+    /// before it slides away.
+    private(set) var isPill = false
+    /// Done was clicked: folding away, at the pill's width.
+    private(set) var isFolding = false
+    /// Whether the notch has something to show, or always shows its pill,
+    /// to take over from the welcome's at the end.
+    @ObservationIgnored var notchHasActivities: () -> Bool = { false }
     var tab: Tab = .everyday
     /// A button is doing something that takes a moment: copying, ejecting.
     private(set) var isWorking = false
+    /// Why copying or cleaning up didn't work, shown in the card.
+    private(set) var installError: String?
 
     // MARK: The display
 
@@ -95,10 +105,15 @@ final class OnboardingModel {
     // MARK: Allow a few things
 
     private(set) var music: OnboardingAccess = .notAsked
+    /// Bringing forward the Terminal or iTerm window a command or agent
+    /// ran in, and pressing Esc in iTerm.
+    private(set) var terminalControl: OnboardingAccess = .notAsked
+    private(set) var iTermControl: OnboardingAccess = .notAsked
+    let hasITerm = NSWorkspace.shared.urlForApplication(withBundleIdentifier: TerminalWindow.iTerm) != nil
     /// Keeps bubbles clear of app menus. Waiting once asked, until it's
     /// turned on in System Settings.
     private(set) var accessibility: OnboardingAccess = AppMenuExtent.isAllowed ? .allowed : .notAsked
-    let network = LocalNetworkProbe()
+    let network = LocalNetworkProbe.shared
     private(set) var helper: OnboardingAccess = LowPowerModeHelperSetup.access
     let hasHelper = LowPowerModeHelperSetup.isAvailable
     let launchAtLogin = LaunchAtLogin()
@@ -107,6 +122,8 @@ final class OnboardingModel {
     // MARK: What shows up
 
     let calendar: CalendarMonitor
+    /// Xcode's setup guide, shown in the card while the welcome is up.
+    let xcode: XcodeBuildMonitor?
     let reminders: RemindersMonitor
     let mirror: MirrorCamera
     /// For messaging people on their birthday, from Next meeting.
@@ -126,19 +143,14 @@ final class OnboardingModel {
     private(set) var hasXcodeScripts = false
     /// Set Up was clicked: the guide takes over in the notch once the
     /// welcome has folded back into it.
-    private(set) var isXcodeGuidePending = false
     private(set) var hasTerminalHook = false
-    private(set) var isGitHubConnected = false
+    /// From the moment GitHub accepts the sign-in.
+    var isGitHubConnected: Bool {
+        GitHubConnection.shared.isConnected && !github.needsSignIn
+    }
 
     // MARK: Given by the window
 
-    /// Runs a Set Up that asks in an alert of its own, with the card
-    /// lowered beneath alerts until it's answered. `waits` is for one that
-    /// puts its alert up later, after this returns.
-    @ObservationIgnored var belowAlerts: (_ waits: Bool, _ body: @escaping () -> Void, _ then: @escaping @MainActor () -> Void) -> Void = { _, body, then in
-        body()
-        then()
-    }
     /// Runs while macOS asks for something, with the card lowered beneath
     /// macOS's prompt until it's done.
     @ObservationIgnored var whileAsking: (_ work: @escaping @MainActor () async -> Void) -> Void = { work in
@@ -152,6 +164,7 @@ final class OnboardingModel {
         installLocation: InstallLocation,
         isFirstRun: Bool,
         calendar: CalendarMonitor,
+        xcode: XcodeBuildMonitor?,
         reminders: RemindersMonitor,
         mirror: MirrorCamera,
         shelf: FileShelf,
@@ -165,6 +178,7 @@ final class OnboardingModel {
         isInstallOnly = !isFirstRun
         self.calendar = calendar
         self.reminders = reminders
+        self.xcode = xcode
         self.mirror = mirror
         self.shelf = shelf
         self.deviceBatteries = deviceBatteries
@@ -180,7 +194,11 @@ final class OnboardingModel {
         refreshTools()
         Task { [weak self] in
             let music = await MusicAutomation.status()
+            let terminal = await AutomationPermission.status(of: TerminalWindow.terminal)
+            let iTerm = await AutomationPermission.status(of: TerminalWindow.iTerm)
             self?.music = music
+            self?.terminalControl = terminal
+            self?.iTermControl = iTerm
         }
     }
 
@@ -239,13 +257,11 @@ final class OnboardingModel {
         case .cleanup:
             cleanUp()
         case let .preview(tool):
-            belowAlerts(false, { tool.setup.setup() }) { [weak self] in
-                guard let self else { return }
-                self.refreshTools()
-                self.go(to: .connect)
-                if self.agentsWithHooks.contains(tool) {
-                    self.whileAsking { await tool.askForPermissions() }
-                }
+            tool.setup.setup()
+            refreshTools()
+            go(to: .connect)
+            if agentsWithHooks.contains(tool) {
+                whileAsking { await tool.askForPermissions() }
             }
         case .done:
             finish()
@@ -333,12 +349,35 @@ final class OnboardingModel {
         menuBarItem.setHighlighted(false)
         approvalWatch?.cancel()
         network.stop()
+        guard !hasNotch else {
+            withAnimation(.island) {
+                isOpen = false
+            }
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                self?.onFinish()
+            }
+            return
+        }
+        // No notch to fold into: it folds to the pill at the top edge, where
+        // activities show, and stays there a moment so you see where. Then
+        // the notch takes over if it has something to show; otherwise the
+        // pill slides up out of sight.
+        isFolding = true
         withAnimation(.island) {
+            isPill = true
             isOpen = false
         }
         Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
-            self?.onFinish()
+            try? await Task.sleep(for: .milliseconds(1500))
+            guard let self else { return }
+            if !self.notchHasActivities() {
+                withAnimation(.islandSlide) {
+                    self.isPill = false
+                }
+                try? await Task.sleep(for: .milliseconds(450))
+            }
+            self.onFinish()
         }
     }
 
@@ -346,14 +385,14 @@ final class OnboardingModel {
 
     private func copyToApplications() {
         isWorking = true
-        do {
-            try InstallLocation.copyToApplicationsAndRelaunch()
-        } catch {
-            isWorking = false
-            belowAlerts(false, {
-                NSApp.activate()
-                NSAlert(error: error).runModal()
-            }, {})
+        installError = nil
+        Task { [weak self] in
+            do {
+                try await InstallLocation.copyToApplicationsAndRelaunch()
+            } catch {
+                self?.isWorking = false
+                self?.installError = "Couldn’t copy MacCove. \(error.localizedDescription)"
+            }
         }
     }
 
@@ -363,16 +402,16 @@ final class OnboardingModel {
             return
         }
         isWorking = true
-        do {
-            try InstallLocation.cleanUp(volume: volume, image: image)
-            isWorking = false
-            go(to: .welcome)
-        } catch {
-            isWorking = false
-            belowAlerts(false, {
-                NSApp.activate()
-                NSAlert(error: error).runModal()
-            }, {})
+        installError = nil
+        Task { [weak self] in
+            do {
+                try await InstallLocation.cleanUp(volume: volume, image: image)
+                self?.isWorking = false
+                self?.go(to: .welcome)
+            } catch {
+                self?.isWorking = false
+                self?.installError = "Couldn’t clean up. \(error.localizedDescription)"
+            }
         }
     }
 
@@ -386,10 +425,63 @@ final class OnboardingModel {
         }
     }
 
+    /// Opens Terminal hidden first if it isn't open, since only an open app
+    /// can be asked about.
+    func allowTerminal() {
+        terminalControl = .asking
+        whileAsking { [weak self] in
+            let access = await AutomationPermission.request(TerminalWindow.terminal, openingHidden: true)
+            self?.terminalControl = access
+        }
+    }
+
+    func allowITerm() {
+        iTermControl = .asking
+        whileAsking { [weak self] in
+            let access = await AutomationPermission.request(TerminalWindow.iTerm, openingHidden: true)
+            self?.iTermControl = access
+        }
+    }
+
     func installHelper() {
-        helper = LowPowerModeHelperSetup.install()
-        if helper == .waiting {
-            watchApprovals()
+        openSystemSettings { [weak self] in
+            self?.helper = LowPowerModeHelperSetup.install()
+            if self?.helper == .waiting {
+                self?.watchApprovals()
+            }
+        }
+    }
+
+    /// Find AirPlay speakers: macOS asks if it never has. If it was turned
+    /// off, Privacy & Security opens with the steps, and the card stays
+    /// lowered beneath it while it's up.
+    func allowNetwork() {
+        network.ask()
+        whileAsking { [weak self] in
+            // Up to five seconds for an answer, or for System Settings.
+            for _ in 0..<20 {
+                if SystemSettings.isInFront || self?.network.access != .asking { break }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+            for _ in 0..<600 {
+                guard SystemSettings.isInFront else { return }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+
+    /// Opens System Settings with the card lowered beneath it for as long
+    /// as it's in front, so the card never covers it.
+    func openSystemSettings(_ open: @escaping () -> Void) {
+        whileAsking {
+            open()
+            // A moment for it to come forward.
+            try? await Task.sleep(for: .seconds(1))
+            // Up to five minutes.
+            for _ in 0..<600 {
+                guard SystemSettings.isInFront else { return }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
         }
     }
 
@@ -503,32 +595,48 @@ final class OnboardingModel {
         XcodeSetupProgress.shared.refreshBehaviors()
         hasXcodeScripts = XcodeBehaviorScripts.isSetUp && XcodeSetupProgress.shared.isComplete
         hasTerminalHook = TerminalHook.isInstalled()
-        isGitHubConnected = GitHubSetup.source != nil && !github.needsSignIn
     }
 
-    /// Xcode is set up in the notch, where the steps stay in view above
-    /// Xcode's Settings. The welcome has the notch until it's done, so the
-    /// scripts are written now and the guide starts as it folds away.
+    /// Xcode's setup guide, in the card while the welcome has the notch's
+    /// place, and kept open there until it's closed with Done.
     func setUpXcode() {
         guard XcodeBehaviorScripts.prepare() else { return }
-        isXcodeGuidePending = true
+        xcode?.startGuide(staysOpen: true)
     }
 
+    /// Xcode's guide is up, in the card.
+    var isXcodeGuiding: Bool {
+        xcode?.guide != nil
+    }
+
+    /// Opening a new terminal window is left, which the card's guide says.
     func setUpTerminal() {
-        belowAlerts(false, { TerminalHook.showSetup() }) { [weak self] in
-            guard let self else { return }
-            self.refreshTools()
-            if self.hasTerminalHook {
-                self.whileAsking { await TerminalWindow.askToControl() }
-            }
+        TerminalHook.setUp()
+        refreshTools()
+        if hasTerminalHook {
+            whileAsking { await TerminalWindow.askToControl() }
         }
     }
 
-    /// Connecting looks for the GitHub CLI first, then asks in an alert.
+    /// One step with the GitHub CLI signed in; without, the card's guide
+    /// walks through gh auth login, and connects once it's done.
     func connectGitHub() {
+        guard !isWaitingForGitHub, !isGitHubConnected else { return }
         let github = github
-        belowAlerts(true, { GitHubSetup.showSetup(monitor: github) }) { [weak self] in
-            self?.refreshTools()
+        Task {
+            await GitHubSetup.connect(monitor: github)
         }
+    }
+
+    /// Checking the GitHub CLI's sign-in with GitHub, or waiting in the
+    /// card's guide for gh auth login.
+    var isWaitingForGitHub: Bool {
+        GitHubConnection.shared.isBusy
+    }
+
+    /// The guide or notice MacCove has for you, shown in the card while it
+    /// has the notch's place.
+    var guide: NotchGuide? {
+        NotchGuides.shared.current
     }
 }

@@ -23,6 +23,7 @@ enum XcodeSetupWindow {
 
     static func show() {
         if let existing = Self.window {
+            existing.centerOnNotchScreen()
             NSApp.activate()
             existing.makeKeyAndOrderFront(nil)
             return
@@ -38,7 +39,7 @@ enum XcodeSetupWindow {
         newWindow.isReleasedWhenClosed = false
         // Opened again later, it comes to the desktop you're on.
         newWindow.collectionBehavior.insert(.moveToActiveSpace)
-        newWindow.center()
+        newWindow.centerOnNotchScreen(always: true)
         Self.window = newWindow
         Self.host = newHost
         NSApp.activate()

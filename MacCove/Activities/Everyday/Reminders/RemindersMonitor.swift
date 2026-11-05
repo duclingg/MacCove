@@ -220,8 +220,7 @@ final class RemindersMonitor {
     }
 
     static func openAccessSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Reminders") else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy("Privacy_Reminders")
     }
 
     private func begin() {

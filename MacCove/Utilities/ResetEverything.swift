@@ -62,7 +62,9 @@ enum ResetEverything {
     }
 
     /// Calendar, Reminders, the camera, Accessibility, Automation and the
-    /// rest: macOS asks again the next time each is set up.
+    /// rest: macOS asks again the next time each is set up. Not Local
+    /// Network, which macOS keeps apart and no app can clear; the welcome
+    /// and Settings check what it says instead.
     private static func resetPermissions() {
         guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return }
         let process = Process()

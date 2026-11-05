@@ -8,6 +8,7 @@
 import AppKit
 import Network
 import ServiceManagement
+import SwiftUI
 
 /// Where one of Allow a Few Things stands.
 enum OnboardingAccess: Equatable {
@@ -42,34 +43,159 @@ enum MusicAutomation {
 
 // MARK: - Local Network
 
-/// Find AirPlay Speakers: Local Network, which macOS asks about the first
-/// time MacCove browses for AirPlay devices. macOS doesn't say what was
-/// answered, so it's Allowed once a device turns up and Denied once the
-/// browse is refused; otherwise just Asked.
+/// Find AirPlay Speakers: Local Network, which macOS asks about once per
+/// app, ever. Nothing MacCove can do clears the answer, Reset All Settings
+/// included, and macOS doesn't say what it was, so MacCove finds out by
+/// looking for AirPlay speakers, as it does for real: a search macOS lets
+/// go ahead, or speakers found, means it's allowed; a search it keeps
+/// refusing means it's off. With no answer yet, that's when macOS asks.
+/// (A service of MacCove's own can't be used to check: macOS refuses it
+/// even when Local Network is on.)
+///
+/// Only once Allow has been clicked, here or in Settings › Permissions:
+/// before then nothing touches the network, so nothing asks by itself.
 @Observable
 final class LocalNetworkProbe {
-    private(set) var access: OnboardingAccess
+    /// One for the welcome and Settings › Permissions, so asking in one
+    /// shows in the other.
+    static let shared = LocalNetworkProbe()
+
+    /// `.asking` while it looks; then `.allowed`, `.denied`, or `.asked`
+    /// when nothing came back in time.
+    private(set) var access: OnboardingAccess = .notAsked
 
     @ObservationIgnored private var browser: NWBrowser?
-    @ObservationIgnored private var timeout: Task<Void, Never>?
+    /// What the search said last, and the wait to see that it holds.
+    @ObservationIgnored private var heard: Heard = .nothing
+    @ObservationIgnored private var settling: Task<Void, Never>?
 
-    /// `kDNSServiceErr_PolicyDenied`: Local Network is off for MacCove.
-    nonisolated private static let policyDenied: Int32 = -65570
+    private enum Heard {
+        case nothing
+        /// macOS let the search go ahead.
+        case ready
+        /// macOS refused it.
+        case refused
+    }
+    @ObservationIgnored private var timeout: Task<Void, Never>?
+    /// Allow was clicked: if it turns out to be off, Privacy & Security
+    /// opens with the steps to turn it on.
+    @ObservationIgnored private var turnsOnWhenRefused = false
+    @ObservationIgnored private var watch: Task<Void, Never>?
+
+    static let guideID = "local-network"
+
+    /// AirPlay's, which MacCove looks for anyway and Info.plist's
+    /// NSBonjourServices lists.
+    nonisolated private static let serviceType = "_airplay._tcp"
+    /// How macOS refuses a browse or an advertisement when Local Network
+    /// is off for MacCove: `kDNSServiceErr_NoAuth` on the Mac, as its log
+    /// shows, and `kDNSServiceErr_PolicyDenied`, which iOS uses.
+    nonisolated private static let refusals: Set<Int32> = [-65555, -65570]
 
     init() {
-        access = UserDefaults.standard.bool(forKey: AirPlayDeviceDirectory.hasBrowsedKey) ? .asked : .notAsked
+        // Asked before: check what was answered, which asks nothing.
+        if UserDefaults.standard.bool(forKey: AirPlayDeviceDirectory.hasBrowsedKey) {
+            check()
+        }
     }
 
+    /// Allow: macOS asks if it never has; otherwise this finds out what
+    /// it was told.
     func ask() {
-        guard browser == nil else { return }
-        // Now asked, the AirPlay speakers are looked for from launch.
+        // From now on the AirPlay speakers are looked for from launch.
         UserDefaults.standard.set(true, forKey: AirPlayDeviceDirectory.hasBrowsedKey)
-        access = .asked
-        let browser = NWBrowser(for: .bonjour(type: "_airplay._tcp", domain: nil), using: .tcp)
+        turnsOnWhenRefused = true
+        check()
+    }
+
+    /// Off already, and macOS won't ask again: opens Privacy & Security,
+    /// the closest System Settings goes to Local Network, with the last
+    /// two clicks guided. It keeps checking quietly, and ticks off once
+    /// MacCove's switch is on.
+    func turnOn() {
+        let guides = NotchGuides.shared
+        guides.show(NotchGuide(
+            id: Self.guideID,
+            icon: .symbol("network", color: .blue),
+            title: "Turn on Local Network for MacCove",
+            subtitle: "macOS asks only once, so it’s a switch now",
+            steps: [
+                NotchGuide.Step(id: "open", text: "Privacy & Security is open", detail: "In System Settings", isDone: true),
+                NotchGuide.Step(id: "list", text: "Click Local Network", detail: "In the list on the right"),
+                NotchGuide.Step(id: "on", text: "Turn on MacCove", detail: "Ticks off when it’s on", isWatching: true),
+            ],
+            actions: [
+                NotchGuide.Action(title: "Open Again", finishes: false) {
+                    LocalNetworkProbe.openSettings()
+                },
+                NotchGuide.Action(title: "Done", isPrimary: true) {},
+            ]
+        ))
+        Self.openSettings()
+        watch?.cancel()
+        watch = Task { [weak self] in
+            // Up to five minutes, checking every few seconds without the
+            // row changing while it does.
+            for _ in 0..<100 {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled, let self, guides.isShowing(Self.guideID) else { return }
+                guard self.access != .allowed else { return }
+                self.check(quiet: true)
+            }
+        }
+    }
+
+    /// Switched on: the guide ticks it off, then leaves.
+    private func guideSawAllowed() {
+        let guides = NotchGuides.shared
+        guard guides.isShowing(Self.guideID) else { return }
+        guides.complete(step: "list", in: Self.guideID)
+        guides.complete(step: "on", in: Self.guideID)
+        guides.update(Self.guideID) { guide in
+            guide.title = "Local Network is on"
+            guide.subtitle = "AirPlay speakers show with the right icon"
+        }
+        watch?.cancel()
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            guides.finish(Self.guideID)
+        }
+    }
+
+    /// `quiet` checks again without the row going back to a spinner.
+    private func check(quiet: Bool = false) {
+        stop()
+        if !quiet {
+            access = .asking
+        }
+        let browser = NWBrowser(for: .bonjour(type: Self.serviceType, domain: nil), using: .tcp)
         browser.stateUpdateHandler = { [weak self] state in
-            guard case let .waiting(error) = state, case let .dns(code) = error, code == Self.policyDenied else { return }
+            let error: NWError
+            let hasFailed: Bool
+            switch state {
+            case .ready:
+                MainActor.assumeIsolated { self?.hear(.ready) }
+                return
+            case let .waiting(waiting):
+                error = waiting
+                hasFailed = false
+            case let .failed(failed):
+                error = failed
+                hasFailed = true
+            default:
+                return
+            }
+            let isRefused = if case let .dns(code) = error { Self.refusals.contains(code) } else { false }
             // Delivered on the main queue, as requested in start(queue:).
-            MainActor.assumeIsolated { self?.finish(.denied) }
+            MainActor.assumeIsolated {
+                if isRefused {
+                    self?.hear(.refused)
+                } else if hasFailed {
+                    // Failed some other way: no answer, rather than a
+                    // spinner that never stops.
+                    self?.couldNotCheck()
+                }
+            }
         }
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             guard !results.isEmpty else { return }
@@ -77,28 +203,78 @@ final class LocalNetworkProbe {
         }
         browser.start(queue: .main)
         self.browser = browser
-        // Long enough to answer macOS and for speakers to answer back.
+
+        // Long enough to answer macOS's prompt.
         timeout = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(60))
-            guard !Task.isCancelled else { return }
-            self?.stop()
+            try? await Task.sleep(for: .seconds(90))
+            guard !Task.isCancelled, let self else { return }
+            if self.access == .asking {
+                self.access = .asked
+            }
+            self.stop()
+        }
+    }
+
+    private func couldNotCheck() {
+        if access == .asking {
+            access = .asked
+        }
+        stop()
+    }
+
+    /// Waits for what the search said to hold before going by it: a ready
+    /// search for a moment means allowed, and a refusal for a few seconds
+    /// means off, since macOS also refuses while its own prompt is still
+    /// up, and lets the search go once it's answered.
+    private func hear(_ heard: Heard) {
+        self.heard = heard
+        settling?.cancel()
+        settling = Task { [weak self] in
+            try? await Task.sleep(for: heard == .ready ? .seconds(1.5) : .seconds(3))
+            guard !Task.isCancelled, let self, self.heard == heard else { return }
+            if heard == .ready {
+                self.finish(.allowed)
+            } else {
+                self.refused()
+            }
+        }
+    }
+
+    private func refused() {
+        if access != .denied {
+            access = .denied
+        }
+        if turnsOnWhenRefused {
+            turnsOnWhenRefused = false
+            turnOn()
+        }
+    }
+
+    private func finish(_ access: OnboardingAccess) {
+        if self.access != access {
+            self.access = access
+        }
+        turnsOnWhenRefused = false
+        stop()
+        if access == .allowed {
+            guideSawAllowed()
         }
     }
 
     func stop() {
         timeout?.cancel()
+        timeout = nil
+        settling?.cancel()
+        settling = nil
+        heard = .nothing
         browser?.cancel()
         browser = nil
     }
 
-    private func finish(_ access: OnboardingAccess) {
-        self.access = access
-        stop()
-    }
-
+    /// Privacy & Security, where Local Network is in the list. System
+    /// Settings has no address that opens Local Network itself.
     static func openSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_LocalNetwork") else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy()
     }
 }
 
@@ -132,7 +308,7 @@ enum LowPowerModeHelperSetup {
             try? service.register()
         }
         if service.status == .requiresApproval {
-            SMAppService.openSystemSettingsLoginItems()
+            SystemSettings.openLoginItems()
         }
         return access
     }

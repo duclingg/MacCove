@@ -16,6 +16,9 @@ import SwiftUI
 struct XcodeGuideView: View {
     let xcode: XcodeBuildMonitor
     let notchHeight: CGFloat
+    /// In the welcome's card rather than the notch: no room kept for the
+    /// notch, and as wide as the card.
+    var isEmbedded = false
 
     @State private var copied = false
 
@@ -57,9 +60,9 @@ struct XcodeGuideView: View {
             chips
                 .padding(.top, Self.chipsGap)
         }
-        .padding(.horizontal, NotchViewModel.expandedInset)
-        .padding(.top, notchHeight + NotchViewModel.expandedTopGap)
-        .frame(width: NotchViewModel.expandedWidth, alignment: .top)
+        .padding(.horizontal, isEmbedded ? 0 : NotchViewModel.expandedInset)
+        .padding(.top, isEmbedded ? 0 : notchHeight + NotchViewModel.expandedTopGap)
+        .frame(width: isEmbedded ? nil : NotchViewModel.expandedWidth, alignment: .top)
     }
 
     // MARK: Header

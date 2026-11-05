@@ -70,16 +70,15 @@ enum XcodeBehaviorScripts {
         XcodeSetupProgress.shared.guideInNotch()
     }
 
-    /// Writes the scripts and copies their folder's path. Says why in an
-    /// alert when they can't be written.
+    /// Writes the scripts and copies their folder's path. Says why in the
+    /// notch when they can't be written.
     @discardableResult
     static func prepare() -> Bool {
         do {
             try install()
             UserDefaults.standard.set(true, forKey: setUpKey)
         } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
+            NotchGuides.shared.show(.error(id: "xcode-scripts", icon: .tool(.xcode), title: "Couldn’t write Xcode’s scripts", error))
             return false
         }
         copyPath()

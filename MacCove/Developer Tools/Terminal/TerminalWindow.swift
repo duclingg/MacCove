@@ -13,8 +13,8 @@ import CoreServices
 /// tab comes forward; any other app (Ghostty, Warp, VS Code…) is just
 /// brought to the front.
 enum TerminalWindow {
-    private static let terminal = "com.apple.Terminal"
-    private static let iTerm = "com.googlecode.iterm2"
+    static let terminal = "com.apple.Terminal"
+    static let iTerm = "com.googlecode.iterm2"
 
     /// Whether the app can say which of its tabs is in front.
     static func knowsTabs(_ appBundleIdentifier: String) -> Bool {

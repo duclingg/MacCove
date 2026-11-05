@@ -85,8 +85,7 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
             // Its hooks now run the one in its folder.
             try? FileManager.default.removeItem(at: oldScriptURL)
         } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
+            NotchGuides.shared.show(.error(id: "claude-setup", icon: .tool(.claudeCode), title: "Couldn’t set up Claude Code", error))
         }
     }
 
@@ -107,8 +106,7 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
             // they'd stay as they are.
             NotificationCenter.default.post(name: .agentHooksRemoved, object: AITool.claude)
         } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
+            NotchGuides.shared.show(.error(id: "claude-setup", icon: .tool(.claudeCode), title: "Couldn’t take out Claude Code’s hooks", error))
         }
     }
 
@@ -156,11 +154,13 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
         do {
             return try readSettings()
         } catch {
-            NSApp.activate()
-            let alert = NSAlert()
-            alert.messageText = "MacCove Couldn’t Read Claude Code’s Settings"
-            alert.informativeText = "~/.claude/settings.json isn’t valid JSON, so MacCove left it alone. \(error.localizedDescription)"
-            alert.runModal()
+            NotchGuides.shared.show(.notice(
+                id: "claude-setup",
+                icon: .tool(.claudeCode),
+                title: "Couldn’t read Claude Code’s settings",
+                message: "~/.claude/settings.json isn’t valid JSON, so MacCove left it alone. \(error.localizedDescription)",
+                tone: .error
+            ))
             return nil
         }
     }

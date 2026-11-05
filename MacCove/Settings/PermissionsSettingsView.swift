@@ -48,6 +48,10 @@ struct PermissionsSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refresh() }
         }
+        // Allow below, and what macOS answered, show straight away.
+        .onChange(of: LocalNetworkProbe.shared.access) {
+            Task { await refresh() }
+        }
     }
 
     private func refresh() async {
@@ -100,6 +104,10 @@ private struct Permission: Identifiable {
         case asksEachTime
         /// Only an app that's open can say.
         case appNotOpen
+        /// macOS asked, and didn't say what you answered.
+        case asked
+        /// Finding out what macOS was told.
+        case checking
 
         var title: String {
             switch self {
@@ -109,6 +117,8 @@ private struct Permission: Identifiable {
             case .waiting: "Waiting"
             case .asksEachTime: "Asks each time"
             case .appNotOpen: "Not open"
+            case .asked: "Asked"
+            case .checking: "Checking…"
             }
         }
 
@@ -117,7 +127,7 @@ private struct Permission: Identifiable {
             case .allowed: .green
             case .denied: .red
             case .waiting, .asksEachTime: .orange
-            case .notAsked, .appNotOpen: .secondary
+            case .notAsked, .appNotOpen, .asked, .checking: .secondary
             }
         }
     }
@@ -141,7 +151,7 @@ private struct Permission: Identifiable {
     static func current() async -> [Permission] {
         var permissions = [accessibility()]
         permissions += await automation()
-        permissions += [calendar(), reminders(), camera(), location(), contacts(), pasteboard()]
+        permissions += [calendar(), reminders(), camera(), location(), contacts(), pasteboard(), localNetwork()]
         if let helper = lowPowerModeHelper() {
             permissions.append(helper)
         }
@@ -331,6 +341,48 @@ private struct Permission: Identifiable {
         )
     }
 
+    /// For the AirPlay speakers' icons. macOS asks once, ever, and nothing
+    /// clears the answer, so MacCove checks what it was once it's been
+    /// asked for. Until it's allowed, the button is here.
+    private static func localNetwork() -> Permission {
+        let probe = LocalNetworkProbe.shared
+        let status: Status = switch probe.access {
+        case .allowed: .allowed
+        case .denied: .denied
+        case .notAsked: .notAsked
+        case .asking: .checking
+        default: .asked
+        }
+        let fix: Fix? = switch status {
+        case .allowed, .checking:
+            nil
+        case .notAsked:
+            Fix(
+                title: "Find AirPlay speakers",
+                detail: "macOS asks for Local Network the first time MacCove looks for speakers.",
+                buttonTitle: "Allow"
+            ) {
+                probe.ask()
+            }
+        default:
+            Fix(
+                title: status == .denied ? "Local Network is off for MacCove" : "Local Network",
+                detail: "macOS asks only once, and Reset All Settings can’t ask again. Turn on MacCove under Local Network in Privacy & Security.",
+                buttonTitle: "Turn On…"
+            ) {
+                probe.turnOn()
+            }
+        }
+        return Permission(
+            id: "local-network",
+            title: "Local Network",
+            detail: "Finds AirPlay speakers and TVs, for the right icon",
+            icon: PermissionIcon(symbol: "network", color: .blue),
+            status: status,
+            fix: fix
+        )
+    }
+
     /// Until macOS has asked, MacCove reads the clipboard freely.
     private static func pasteboard() -> Permission {
         let status: Status = switch NSPasteboard.general.accessBehavior {
@@ -378,7 +430,7 @@ private struct Permission: Identifiable {
                 detail: "Turn on MacCove under Allow in the Background.",
                 buttonTitle: "Open Login Items"
             ) {
-                SMAppService.openSystemSettingsLoginItems()
+                SystemSettings.openLoginItems()
             } : nil
         )
     }
@@ -386,9 +438,7 @@ private struct Permission: Identifiable {
     /// Privacy & Security in System Settings, at `pane` when there's one:
     /// "Privacy_Contacts" and so on.
     static func openPrivacy(_ pane: String?) {
-        let base = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension"
-        guard let url = URL(string: pane.map { "\(base)?\($0)" } ?? base) else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy(pane)
     }
 }
 

@@ -13,8 +13,9 @@ import SwiftUI
 /// top of that display, so Done can point at the menu bar item, but only
 /// the card takes clicks.
 final class OnboardingWindowController {
-    /// Room below the menu bar for the tallest step and its shadow.
-    private static let panelHeight: CGFloat = 640
+    /// Room below the menu bar for the tallest step with a guide in it,
+    /// and its shadow.
+    private static let panelHeight: CGFloat = 900
     /// The notch's own level: above the menu bar.
     private static let level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
 
@@ -22,7 +23,6 @@ final class OnboardingWindowController {
     private let model: OnboardingModel
     private var eventMonitors: [Any] = []
     private var screenObserver: NSObjectProtocol?
-    private var restoringLevel: Task<Void, Never>?
     /// How many of macOS's prompts are up, with the card lowered for them.
     private var askingCount = 0
 
@@ -37,9 +37,6 @@ final class OnboardingWindowController {
         hostingView.sizingOptions = []
         panel.contentView = hostingView
 
-        model.belowAlerts = { [weak self] waits, body, then in
-            self?.runBelowAlerts(waits: waits, body, then: then)
-        }
         model.whileAsking = { [weak self] work in
             self?.runWhileAsking(work)
         }
@@ -53,6 +50,7 @@ final class OnboardingWindowController {
 
     func show() {
         reposition()
+        NSApp.activate()
         panel.orderFrontRegardless()
         panel.makeKey()
         updateMouse()
@@ -88,8 +86,15 @@ final class OnboardingWindowController {
 
     /// Shown again while it's already up, from Settings.
     func bringForward() {
+        focus()
+    }
+
+    /// In front and in focus: MacCove active again, after a prompt or
+    /// System Settings took it, with the card taking Return and Esc.
+    private func focus() {
+        NSApp.activate()
         panel.orderFrontRegardless()
-        panel.makeKey()
+        panel.makeKeyAndOrderFront(nil)
     }
 
     private func close() {
@@ -101,7 +106,6 @@ final class OnboardingWindowController {
             NotificationCenter.default.removeObserver(screenObserver)
         }
         screenObserver = nil
-        restoringLevel?.cancel()
         panel.orderOut(nil)
         onClose()
     }
@@ -149,43 +153,9 @@ final class OnboardingWindowController {
             await work()
             guard let self else { return }
             self.askingCount -= 1
-            if self.askingCount == 0, self.restoringLevel == nil {
-                self.panel.level = Self.level
-                self.panel.orderFrontRegardless()
-                self.panel.makeKey()
-            }
-        }
-    }
-
-    /// Set Up for Xcode, the terminal and GitHub ask in alerts, which sit
-    /// below the menu bar and so below the card. The card goes down to the
-    /// level of other windows until the alert's answered.
-    private func runBelowAlerts(waits: Bool, _ body: () -> Void, then: @escaping @MainActor () -> Void) {
-        restoringLevel?.cancel()
-        panel.level = .normal
-        body()
-        restoringLevel = Task { @MainActor [weak self] in
-            if waits {
-                // Its alert goes up once it's looked for a sign-in.
-                // Up to four seconds.
-                for _ in 0..<40 {
-                    if NSApp.modalWindow != nil { break }
-                    try? await Task.sleep(for: .milliseconds(100))
-                    if Task.isCancelled { return }
-                }
-            }
-            while NSApp.modalWindow != nil {
-                try? await Task.sleep(for: .milliseconds(200))
-                if Task.isCancelled { return }
-            }
-            guard let self else { return }
-            self.restoringLevel = nil
-            // First, so a prompt it starts keeps the card lowered.
-            then()
             if self.askingCount == 0 {
                 self.panel.level = Self.level
-                self.panel.orderFrontRegardless()
-                self.panel.makeKey()
+                self.focus()
             }
         }
     }
@@ -197,7 +167,10 @@ final class OnboardingPanel: NSPanel {
     init() {
         super.init(
             contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
+            // Not non-activating, unlike the notch: clicking the welcome
+            // makes MacCove the active app, which it has to be to bring
+            // System Settings forward for a permission.
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )

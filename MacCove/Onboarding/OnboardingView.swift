@@ -37,13 +37,22 @@ struct OnboardingView: View {
     // MARK: The card
 
     private var radius: CGFloat {
-        model.isOpen ? 32 : (model.hasNotch ? 10 : 0)
+        model.isOpen ? 32 : (model.hasNotch || model.isPill ? 10 : 0)
     }
 
     /// The notch, or on a display without one, nothing yet: it drops from
     /// the top edge.
+    /// At the end on a display without one, the pill where activities
+    /// show, before it slides away.
     private var closedSize: CGSize {
-        model.hasNotch ? model.notchSize : CGSize(width: model.step.width * 0.6, height: 0)
+        if model.hasNotch || model.isPill {
+            return model.notchSize
+        }
+        // Sliding up out of sight from the pill, rather than widening.
+        if model.isFolding {
+            return CGSize(width: model.notchSize.width, height: 0)
+        }
+        return CGSize(width: model.step.width * 0.6, height: 0)
     }
 
     /// Clear of the camera housing.
@@ -59,6 +68,34 @@ struct OnboardingView: View {
                 OnboardingStepView(model: model)
                     .id(model.step)
                     .transition(.opacity.animation(.easeOut(duration: 0.18)))
+            }
+            if let installError = model.installError {
+                Text(installError)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.islandError)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+            }
+            // What would show in the notch, while the card has its place:
+            // Xcode's setup, the rest of another, or something MacCove has
+            // to say.
+            if let xcode = model.xcode, xcode.guide != nil {
+                XcodeGuideView(xcode: xcode, notchHeight: 0, isEmbedded: true)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 4)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(0.07)))
+                    .padding(.top, 16)
+                    .transition(.opacity)
+            }
+            if let guide = model.guide {
+                NotchGuideContent(guide: guide) { action in
+                    NotchGuides.shared.perform(action, in: guide)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 4)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.white.opacity(0.07)))
+                .padding(.top, 16)
+                .transition(.opacity)
             }
             footer
                 .padding(.top, 20)
@@ -78,7 +115,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, -IslandShape.earWidth)
                 .shadow(color: .black.opacity(model.isOpen ? 0.45 : 0), radius: 32, y: 24)
                 // With no notch to grow from, even the ears wait to drop.
-                .opacity(model.isOpen || model.hasNotch ? 1 : 0)
+                .opacity(model.isOpen || model.hasNotch || model.isPill || model.isFolding ? 1 : 0)
         }
         .animation(.island, value: model.isOpen)
         .onGeometryChange(for: CGRect.self) { proxy in
@@ -112,6 +149,13 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(OnboardingButtonStyle(kind: .secondary))
                 .keyboardShortcut(.cancelAction)
+                .disabled(model.isWorking)
+            }
+            if model.isWorking {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white)
+                    .accessibilityLabel(model.step == .move ? "Copying MacCove" : "Cleaning up")
             }
             Button(model.primaryTitle) {
                 model.primaryAction()

@@ -49,9 +49,7 @@ nonisolated enum AppMenuExtent {
     @MainActor
     static func openSettings() {
         requestPermission()
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
+        SystemSettings.openPrivacy("Privacy_Accessibility")
     }
 
     /// The menus of the app with `pid` on the main display's menu bar.

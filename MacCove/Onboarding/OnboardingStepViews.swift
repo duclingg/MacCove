@@ -361,6 +361,14 @@ private struct AccessStep: View {
                 row("Control Music", detail: "Favorite songs in Music, and show exactly where a song is up to.", symbol: "music.note", color: .pink) {
                     trailing(model.music, allow: "Allow", action: model.allowMusic, openSettings: MusicAutomation.openSettings)
                 }
+                row("Control Terminal", detail: "Brings forward the window a command or coding agent ran in.", symbol: "terminal", color: .gray) {
+                    trailing(model.terminalControl, allow: "Allow", action: model.allowTerminal, openSettings: AutomationPermission.openSettings)
+                }
+                if model.hasITerm {
+                    row("Control iTerm", detail: "Brings forward its window, and presses Esc to stop an agent.", symbol: "apple.terminal", color: .green) {
+                        trailing(model.iTermControl, allow: "Allow", action: model.allowITerm, openSettings: AutomationPermission.openSettings)
+                    }
+                }
                 row(
                     "Keep clear of app menus",
                     detail: model.accessibility == .waiting
@@ -373,8 +381,24 @@ private struct AccessStep: View {
                         AppMenuExtent.openSettings()
                     }
                 }
-                row("Find AirPlay speakers", detail: "Shows the right icon for HomePods and TVs on your network.", symbol: "airplayaudio", color: .blue) {
-                    trailing(model.network.access, allow: "Allow", action: model.network.ask, openSettings: LocalNetworkProbe.openSettings)
+                row(
+                    "Find AirPlay speakers",
+                    // macOS asks about Local Network once, ever: a reset
+                    // doesn't bring the question back, so say where it is.
+                    detail: networkDetail,
+                    symbol: "airplayaudio",
+                    color: .blue
+                ) {
+                    if model.network.access == .asked {
+                        Button("Turn On") {
+                            model.openSystemSettings { LocalNetworkProbe.shared.turnOn() }
+                        }
+                            .buttonStyle(OnboardingButtonStyle(kind: .row))
+                    } else {
+                        trailing(model.network.access, allow: "Allow", action: model.allowNetwork) {
+                            LocalNetworkProbe.shared.turnOn()
+                        }
+                    }
                 }
                 if model.hasHelper {
                     row(
@@ -387,7 +411,7 @@ private struct AccessStep: View {
                         glyph: Color(red: 28 / 255, green: 19 / 255, blue: 0)
                     ) {
                         trailing(model.helper, allow: "Install", action: model.installHelper) {
-                            SMAppService.openSystemSettingsLoginItems()
+                            SystemSettings.openLoginItems()
                         }
                     }
                 }
@@ -402,6 +426,14 @@ private struct AccessStep: View {
                 }
             }
             .padding(.top, 12)
+        }
+    }
+
+    private var networkDetail: String {
+        switch model.network.access {
+        case .denied: "Off for MacCove. Turn it on under Local Network in Privacy & Security."
+        case .asked: "macOS didn’t answer. Check MacCove under Local Network in Privacy & Security."
+        default: "Shows the right icon for HomePods and TVs on your network."
         }
     }
 
@@ -456,7 +488,9 @@ private struct AccessStep: View {
         case .waiting:
             StatusLabel(text: "Waiting for approval", color: .orange)
         case .denied:
-            Button("Open Settings", action: openSettings)
+            Button("Open Settings") {
+                model.openSystemSettings(openSettings)
+            }
                 .buttonStyle(OnboardingButtonStyle(kind: .row))
         }
     }
@@ -567,7 +601,7 @@ private struct ConnectStep: View {
     private var cameraTrailing: Tile.Trailing {
         switch model.mirror.access {
         case .granted: .on
-        case .denied: .button("Open Settings", MirrorCamera.openAccessSettings)
+        case .denied: .button("Open Settings", { model.openSystemSettings(MirrorCamera.openAccessSettings) })
         case .notDetermined: .button("Allow", model.allowCamera)
         }
     }
@@ -577,7 +611,7 @@ private struct ConnectStep: View {
         case (true, .granted): .on
         case (_, .denied): .button("Open Settings", {
             model.calendar.setLeaveTimeEnabled(true)
-            CalendarMonitor.openLocationSettings()
+            model.openSystemSettings(CalendarMonitor.openLocationSettings)
         })
         case (true, .notDetermined): .progress
         default: .button("Allow", model.allowLeaveTime)
@@ -588,8 +622,7 @@ private struct ConnectStep: View {
         switch model.contacts {
         case .allowed: .on
         case .denied: .button("Open Settings", {
-            guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Contacts") else { return }
-            NSWorkspace.shared.open(url)
+            model.openSystemSettings { SystemSettings.openPrivacy("Privacy_Contacts") }
         })
         default: .button("Allow", model.allowContacts)
         }
@@ -608,7 +641,7 @@ private struct ConnectStep: View {
         case (_, .denied):
             .button("Open Settings", {
                 enable()
-                openSettings()
+                model.openSystemSettings(openSettings)
             })
         case (true, .notDetermined):
             .progress
@@ -637,7 +670,7 @@ private struct ConnectStep: View {
                 icon: .tool(ToolIcon(.xcode, size: 30)),
                 trailing: model.hasXcodeScripts
                     ? .on
-                    : model.isXcodeGuidePending ? .status("Next, in the notch", Color.xcodeBuild) : .button("Set Up", model.setUpXcode)
+                    : model.isXcodeGuiding ? .status("Setting up", Color.xcodeBuild) : .button("Set Up", model.setUpXcode)
             ))
         }
         tiles.append(Tile(
@@ -649,7 +682,7 @@ private struct ConnectStep: View {
         tiles.append(Tile(
             id: "github", name: "GitHub", detail: "Uses your gh sign-in, or a token",
             icon: .tool(ToolIcon(.gitHub, size: 30)),
-            trailing: model.isGitHubConnected ? .on : .button("Connect", model.connectGitHub)
+            trailing: model.isGitHubConnected ? .on : model.isWaitingForGitHub ? .progress : .button("Connect", model.connectGitHub)
         ))
         for tool in AITool.allCases where !model.installedAgents.contains(tool) {
             tiles.append(Tile(

@@ -119,6 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bridge = AgentBridge { [weak agents] request in
             let prefixes = ["/claude/", "/codex/", "/cursor/"]
             guard prefixes.contains(where: { request.path.hasPrefix($0) }), let agents else { return .empty }
+            if request.path.hasPrefix("/codex/") {
+                CodexSetup.hookArrived()
+            }
             return await agents.handle(request)
         }
         do {
@@ -166,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             installLocation: location,
             isFirstRun: isFirstRun,
             calendar: calendar,
+            xcode: xcode,
             reminders: reminders,
             mirror: mirror,
             shelf: shelf,
@@ -177,14 +181,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.setClipboardEnabled(enabled)
             }
         )
+        model.notchHasActivities = { [weak self] in
+            let hasActivities = self?.viewModel?.activities.isEmpty == false
+            return hasActivities || NotchSettings.noNotchVisibility == .always
+        }
         let controller = OnboardingWindowController(model: model)
         controller.onClose = { [weak self] in
             self?.onboarding = nil
             self?.notchController?.isSuspended = false
-            // Xcode's Set Up in the welcome carries on in the notch.
-            if model.isXcodeGuidePending {
-                XcodeSetupProgress.shared.guideInNotch()
-            }
+            // Xcode's setup, if it's not done, carries on in the notch.
+            self?.xcode?.releaseGuide()
         }
         onboarding = controller
         notchController?.isSuspended = true
@@ -199,15 +205,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    func showGitHubSetup() {
-        GitHubSetup.showSetup(monitor: github)
-    }
-    
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, replyEvent: NSAppleEventDescriptor) {
         guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
               let url = URL(string: string) else { return }
-        if xcode?.handle(url) != true {
-            terminal?.handle(url)
+        if xcode?.handle(url) != true, terminal?.handle(url) == true {
+            // A shell has the hook loaded, which Set Up's guide waits for.
+            TerminalHook.commandArrived()
         }
     }
 }

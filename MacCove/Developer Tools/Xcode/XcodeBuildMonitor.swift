@@ -83,6 +83,10 @@ final class XcodeBuildMonitor {
     /// view while Xcode's Settings window covers MacCove's. It takes the
     /// notch's Xcode place while it's there, ahead of any build.
     struct Guide: Equatable {
+        /// Shown in the welcome's card, which has the notch's place: it
+        /// stays open there until it's closed with Done, rather than
+        /// shrinking to the pill or leaving by itself.
+        var staysOpen = false
         /// On the first step: getting to Behaviors in Xcode's Settings,
         /// before any events. Every guide starts here.
         var isAtStart = true
@@ -159,16 +163,27 @@ final class XcodeBuildMonitor {
         }
     }
 
-    func startGuide() {
+    func startGuide(staysOpen: Bool = false) {
         guideTask?.cancel()
         let wasShown = isShown
         setup.refreshBehaviors()
-        guide = Guide()
+        guide = Guide(staysOpen: staysOpen)
         watchBehaviors()
         if !wasShown {
             onEvent?(.started)
         }
         // Open for a moment, so it's seen, then the pill counts.
+        onEvent?(.failed)
+        if guideGroup == nil {
+            leaveGuideSoon()
+        }
+    }
+
+    /// The welcome has folded away: an unfinished guide carries on in the
+    /// notch like any other.
+    func releaseGuide() {
+        guard guide?.staysOpen == true else { return }
+        guide?.staysOpen = false
         onEvent?(.failed)
         if guideGroup == nil {
             leaveGuideSoon()
@@ -262,6 +277,8 @@ final class XcodeBuildMonitor {
 
     /// All set: a check, then it leaves.
     private func leaveGuideSoon() {
+        // In the welcome, Done closes it.
+        guard guide?.staysOpen != true else { return }
         guideTask?.cancel()
         guideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(8))

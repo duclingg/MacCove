@@ -64,10 +64,19 @@ struct GeneralSettingsView: View {
                     Text("Show Welcome Again")
                     Text("Runs the setup from the first launch.")
                 }
-                LabeledContent("Reset all settings") {
-                    Button("Reset…", role: .destructive) {
-                        isConfirmingReset = true
+                // Clicked twice, like Merge in the notch: the first click
+                // says what goes, the second within a few seconds resets.
+                LabeledContent {
+                    Button(isConfirmingReset ? "Click Again to Reset" : "Reset…", role: .destructive) {
+                        if isConfirmingReset {
+                            ResetEverything.resetAndRelaunch()
+                        } else {
+                            isConfirmingReset = true
+                        }
                     }
+                } label: {
+                    Text("Reset all settings")
+                    Text(isConfirmingReset ? Self.resetDetail : "Takes out everything MacCove set up, then reopens it")
                 }
                 .tint(.red)
             }
@@ -77,14 +86,15 @@ struct GeneralSettingsView: View {
         .onAppear {
             launchAtLogin.refresh()
         }
-        .confirmationDialog("Reset All Settings?", isPresented: $isConfirmingReset) {
-            Button("Reset and Reopen MacCove", role: .destructive) {
-                ResetEverything.resetAndRelaunch()
-            }
-        } message: {
-            Text("MacCove takes out everything it set up: the hooks in Claude Code, Codex and Cursor, the lines in ~/.zshrc, Xcode’s Behaviors that run its scripts, and the scripts themselves. GitHub is signed out, the Low Power Mode helper and the login item are removed, the shelf is emptied, and macOS forgets the permissions it gave MacCove. Then MacCove reopens to the welcome. Backups of other apps’ settings are kept.")
+        // Not clicked again in time: back to Reset….
+        .task(id: isConfirmingReset) {
+            guard isConfirmingReset else { return }
+            try? await Task.sleep(for: .seconds(5))
+            isConfirmingReset = false
         }
     }
+
+    private static let resetDetail = "Takes out the hooks in Claude Code, Codex and Cursor, the lines in ~/.zshrc, Xcode’s Behaviors that run MacCove’s scripts, and the scripts themselves. Signs out of GitHub, removes the Low Power Mode helper and the login item, empties the shelf, and has macOS forget MacCove’s permissions, except Local Network, which macOS keeps: change that under Local Network in Privacy & Security. Then MacCove reopens to the welcome. Backups of other apps’ settings are kept."
 }
 
 #if DEBUG

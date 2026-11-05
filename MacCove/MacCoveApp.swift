@@ -63,6 +63,7 @@ struct MacCoveApp: App {
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }
+        window.centerOnNotchScreen()
         NSApp.unhide(nil)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)

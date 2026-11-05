@@ -72,8 +72,7 @@ enum CursorSetup: AgentSetupProtocol {
                 try save(updated)
             }
         } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
+            NotchGuides.shared.show(.error(id: "cursor-setup", icon: .tool(.cursor), title: "Couldn’t set up Cursor", error))
         }
     }
 
@@ -93,8 +92,7 @@ enum CursorSetup: AgentSetupProtocol {
             // they'd stay as they are.
             NotificationCenter.default.post(name: .agentHooksRemoved, object: AITool.cursor)
         } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
+            NotchGuides.shared.show(.error(id: "cursor-setup", icon: .tool(.cursor), title: "Couldn’t take out Cursor’s hooks", error))
         }
     }
 
@@ -133,11 +131,13 @@ enum CursorSetup: AgentSetupProtocol {
         do {
             return try readHooks()
         } catch {
-            NSApp.activate()
-            let alert = NSAlert()
-            alert.messageText = "MacCove Couldn’t Read Cursor’s Hooks"
-            alert.informativeText = "~/.cursor/hooks.json isn’t valid JSON, so MacCove left it alone. \(error.localizedDescription)"
-            alert.runModal()
+            NotchGuides.shared.show(.notice(
+                id: "cursor-setup",
+                icon: .tool(.cursor),
+                title: "Couldn’t read Cursor’s settings",
+                message: "~/.cursor/hooks.json isn’t valid JSON, so MacCove left it alone. \(error.localizedDescription)",
+                tone: .error
+            ))
             return nil
         }
     }

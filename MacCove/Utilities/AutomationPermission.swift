@@ -45,8 +45,7 @@ enum AutomationPermission {
     }
 
     static func openSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Automation") else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy("Privacy_Automation")
     }
 
     private static func access(for status: OSStatus) -> OnboardingAccess {
