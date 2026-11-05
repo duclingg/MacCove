@@ -73,9 +73,14 @@ final class OnboardingModel {
     /// The pill has slid up past the top edge, all of it at once and in
     /// its own shape.
     private(set) var isSlidAway = false
-    /// Whether the notch has something to show, or always shows its pill,
-    /// to take over from the welcome's at the end.
-    @ObservationIgnored var notchHasActivities: () -> Bool = { false }
+    /// The notch's shape as it is now, when it has something to show (or,
+    /// without a notch, always shows its pill): the welcome folds straight
+    /// into it, and the notch takes over in that same shape. `nil` when
+    /// there's nothing to show.
+    @ObservationIgnored var notchShape: () -> IslandGeometry? = { nil }
+    /// What Done folds into: the notch's shape with its activities, when
+    /// there are any.
+    private(set) var foldShape: IslandGeometry?
     var tab: Tab = .everyday
     /// A button is doing something that takes a moment: copying, ejecting.
     private(set) var isWorking = false
@@ -359,6 +364,22 @@ final class OnboardingModel {
         menuBarItem.setHighlighted(false)
         approvalWatch?.cancel()
         network.stop()
+        // Something's running: straight into the notch as it is now, which
+        // takes over in the same shape. Without a notch it stays there a
+        // moment first, so you see where activities show.
+        if let shape = notchShape() {
+            foldShape = shape
+            withAnimation(.island) {
+                isOpen = false
+            }
+            let hold: Duration = hasNotch ? .milliseconds(500) : .milliseconds(1500)
+            Task { [weak self] in
+                try? await Task.sleep(for: hold)
+                self?.onFinish()
+            }
+            return
+        }
+        // Nothing running: back into the notch, and done.
         guard !hasNotch else {
             withAnimation(.island) {
                 isOpen = false
@@ -369,10 +390,8 @@ final class OnboardingModel {
             }
             return
         }
-        // No notch to fold into: it folds to the pill at the top edge, where
-        // activities show, and stays there a moment so you see where. Then
-        // the notch takes over if it has something to show; otherwise the
-        // pill slides up out of sight.
+        // No notch: to the pill at the top edge, where activities show, a
+        // moment there, then up out of sight.
         withAnimation(.island) {
             isPill = true
             isOpen = false
@@ -380,12 +399,10 @@ final class OnboardingModel {
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(1500))
             guard let self else { return }
-            if !self.notchHasActivities() {
-                withAnimation(.islandSlide) {
-                    self.isSlidAway = true
-                }
-                try? await Task.sleep(for: .milliseconds(450))
+            withAnimation(.islandSlide) {
+                self.isSlidAway = true
             }
+            try? await Task.sleep(for: .milliseconds(450))
             self.onFinish()
         }
     }

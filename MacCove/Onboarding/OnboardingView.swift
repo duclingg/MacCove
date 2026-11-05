@@ -37,7 +37,9 @@ struct OnboardingView: View {
     // MARK: The card
 
     private var radius: CGFloat {
-        model.isOpen ? 32 : (model.hasNotch || model.isPill ? 10 : 0)
+        if model.isOpen { return 32 }
+        if let shape = model.foldShape { return shape.cornerRadius }
+        return model.hasNotch || model.isPill ? 10 : 0
     }
 
     /// The notch, or on a display without one, nothing yet: it drops from
@@ -45,8 +47,17 @@ struct OnboardingView: View {
     /// At the end on a display without one, the pill where activities
     /// show, before it slides away.
     private var closedSize: CGSize {
-        if model.hasNotch || model.isPill {
+        // Done with something running: the notch's shape as it is now.
+        if let shape = model.foldShape {
+            return shape.size
+        }
+        if model.hasNotch {
             return model.notchSize
+        }
+        // The notch's own resting pill exactly, so handing over to it
+        // doesn't jump.
+        if model.isPill {
+            return CGSize(width: NotchViewModel.compactWidth(notch: model.notchSize), height: model.notchSize.height)
         }
         return CGSize(width: model.step.width * 0.6, height: 0)
     }
@@ -111,7 +122,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, -IslandShape.earWidth)
                 .shadow(color: .black.opacity(model.isOpen ? 0.45 : 0), radius: 32, y: 24)
                 // With no notch to grow from, even the ears wait to drop.
-                .opacity(model.isOpen || model.hasNotch || model.isPill ? 1 : 0)
+                .opacity(model.isOpen || model.hasNotch || model.isPill || model.foldShape != nil ? 1 : 0)
         }
         // At the end without a notch, the pill leaves by sliding up past
         // the top edge whole, rather than shrinking, which would flatten

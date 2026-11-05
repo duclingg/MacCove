@@ -36,19 +36,25 @@ final class NotchWindowController {
         didSet {
             guard isSuspended != oldValue else { return }
             guard !isSuspended else {
+                // The shape the welcome folds into, with nothing in it yet.
+                viewModel.isContentHidden = true
                 reposition()
                 return
             }
-            // Shown first as the bare notch the welcome just folded into,
-            // then whatever's running animates out of it. With nothing
-            // running there's nothing to animate to.
-            viewModel.isEmerging = viewModel.hasRunningActivities
+            // Back as it is now, in the shape the welcome folded into. Clear
+            // until it's drawn, so the picture it had when it was hidden
+            // can't flash up first.
+            panel.alphaValue = 0
             reposition()
             Task { @MainActor [weak self] in
-                // A frame or so on screen as the notch.
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self else { return }
+                self.panel.alphaValue = 1
+                // Once the welcome's window has gone from over it: what's
+                // running fades in, and its bubbles split off the sides.
                 try? await Task.sleep(for: .milliseconds(60))
                 withAnimation(.island) {
-                    self?.viewModel.isEmerging = false
+                    self.viewModel.isContentHidden = false
                 }
             }
         }

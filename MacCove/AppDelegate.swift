@@ -181,14 +181,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.setClipboardEnabled(enabled)
             }
         )
-        model.notchHasActivities = { [weak self] in
-            let hasActivities = self?.viewModel?.activities.isEmpty == false
-            return hasActivities || NotchSettings.noNotchVisibility == .always
+        model.notchShape = { [weak self] in
+            guard let viewModel = self?.viewModel else { return nil }
+            let showsPill = !viewModel.hasPhysicalNotch && NotchSettings.noNotchVisibility == .always
+            guard viewModel.hasRunningActivities || showsPill else { return nil }
+            return viewModel.geometry
         }
         let controller = OnboardingWindowController(model: model)
+        controller.onWillClose = { [weak self] in
+            self?.notchController?.isSuspended = false
+        }
         controller.onClose = { [weak self] in
             self?.onboarding = nil
-            self?.notchController?.isSuspended = false
             // Xcode's setup, if it's not done, carries on in the notch.
             self?.xcode?.releaseGuide()
         }

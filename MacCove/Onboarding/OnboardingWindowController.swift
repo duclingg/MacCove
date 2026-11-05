@@ -26,6 +26,9 @@ final class OnboardingWindowController {
     /// How many of macOS's prompts are up, with the card lowered for them.
     private var askingCount = 0
 
+    /// Folded back into the notch: the notch can come back underneath, so
+    /// there's never a frame with neither.
+    var onWillClose: () -> Void = {}
     /// Folded back into the notch and gone.
     var onClose: () -> Void = {}
 
@@ -117,6 +120,17 @@ final class OnboardingWindowController {
     }
 
     private func close() {
+        // The notch's own window first, under this one, showing the same
+        // shape this one folded to; this one goes a few frames later.
+        onWillClose()
+        panel.orderFrontRegardless()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            self?.remove()
+        }
+    }
+
+    private func remove() {
         for monitor in eventMonitors {
             NSEvent.removeMonitor(monitor)
         }

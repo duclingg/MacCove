@@ -348,20 +348,17 @@ final class NotchViewModel {
     /// What's shown on its own, the island's first and the rest for the
     /// bubbles.
     var activities: [IslandActivity] {
-        // Back from the welcome: the bare notch for a moment, so what's
-        // running springs out of it instead of being there all at once.
-        guard !isEmerging else { return [] }
-        return Array(runningActivities.prefix(maxActivities))
+        Array(runningActivities.prefix(maxActivities))
     }
 
-    /// Set by `NotchWindowController` as the notch comes back after the
-    /// welcome, which had its place, and cleared a moment later.
-    var isEmerging = false
-
-    /// Something to show, whether or not it's emerging yet.
     var hasRunningActivities: Bool {
         !runningActivities.isEmpty
     }
+
+    /// While the welcome has the notch's place: the island keeps its shape,
+    /// which the welcome folds into, with what's in it and the bubbles
+    /// beside it hidden, to come in as it hands over.
+    var isContentHidden = false
 
     /// Running past those, stacked as mini icons in the right bubble.
     var overflowActivities: [IslandActivity] {
@@ -484,8 +481,7 @@ final class NotchViewModel {
     /// floating black pill, so it slides up off the top of the screen
     /// instead, unless Displays says to keep it there always.
     var isTuckedAway: Bool {
-        // Emerging, it's at the top edge where the welcome's pill just was.
-        state == .idle && !isEmerging && !hasPhysicalNotch && noNotchVisibility != .always
+        state == .idle && !hasPhysicalNotch && noNotchVisibility != .always
     }
 
     /// A small bar at the top edge, marking where the tucked-away island is.
@@ -579,7 +575,7 @@ final class NotchViewModel {
     /// icons beside the second, always on the right; without room on the
     /// left, the third joins the stack.
     var bubbles: [IslandBubble] {
-        guard state == .compact, appMenus?.spillsPastCentre != true else { return [] }
+        guard state == .compact, appMenus?.spillsPastCentre != true, !isContentHidden else { return [] }
         var trailing = Array(activities.dropFirst())
         guard let second = trailing.first else { return [] }
         let overflow = overflowActivities

@@ -41,6 +41,9 @@ struct IslandView: View {
 
             content
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+                // Coming in after the welcome folds into the island's shape.
+                .opacity(viewModel.isContentHidden ? 0 : 1)
+                .animation(.easeOut(duration: 0.25), value: viewModel.isContentHidden)
                 .clipShape(IslandBodyShape(cornerRadius: geometry.cornerRadius, minHeight: viewModel.notchSize.height))
                 .contentShape(Rectangle())
                 .onTapGesture {
