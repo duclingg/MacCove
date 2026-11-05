@@ -13,8 +13,8 @@ import CoreServices
 /// tab comes forward; any other app (Ghostty, Warp, VS Code…) is just
 /// brought to the front.
 enum TerminalWindow {
-    private static let terminal = "com.apple.Terminal"
-    private static let iTerm = "com.googlecode.iterm2"
+    static let terminal = "com.apple.Terminal"
+    static let iTerm = "com.googlecode.iterm2"
 
     /// Whether the app can say which of its tabs is in front.
     static func knowsTabs(_ appBundleIdentifier: String) -> Bool {
@@ -35,6 +35,15 @@ enum TerminalWindow {
         var error: NSDictionary?
         let tty = NSAppleScript(source: source)?.executeAndReturnError(&error).stringValue
         return error == nil ? tty : nil
+    }
+
+    /// Set Up asks to control Terminal and iTerm, whichever are open, so
+    /// bringing a window forward later doesn't. One that isn't open asks
+    /// the first time a window of it is brought forward.
+    static func askToControl() async {
+        for app in [terminal, iTerm] where AutomationPermission.isRunning(app) {
+            _ = await AutomationPermission.request(app, openingHidden: false)
+        }
     }
 
     private static func mayControl(_ appBundleIdentifier: String) -> Bool {

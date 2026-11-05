@@ -366,18 +366,22 @@ final class CalendarMonitor {
             Task { @MainActor in
                 guard let self, self.isEnabled else { return }
                 self.refreshPermissions()
+                // The status can lag the answer by a moment: read it again
+                // rather than stay Not Asked.
+                for _ in 0..<6 where self.access == .notDetermined {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    self.refreshPermissions()
+                }
             }
         }
     }
 
     static func openAccessSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Calendars") else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy("Privacy_Calendars")
     }
 
     static func openLocationSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_LocationServices") else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy("Privacy_LocationServices")
     }
 
     private func begin() {

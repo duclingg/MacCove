@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var xcode: XcodeBuildMonitor?
     private var terminal: TerminalCommandMonitor?
     private var agentBridge: AgentBridge?
+    /// The welcome, while it's showing.
+    private var onboarding: OnboardingWindowController?
     private let music = MusicScripting()
     // Made here rather than at launch, so Settings has them too.
     private(set) lazy var nowPlaying = NowPlayingModel(music: music)
@@ -57,6 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let agents = AgentMonitor()
         self.xcode = xcode
         self.terminal = terminal
+        XcodeSetupProgress.shared.guideInNotch = { [weak xcode] in
+            xcode?.startGuide()
+        }
+        XcodeSetupProgress.shared.showSettings = { [weak self] in
+            self?.showSettings?()
+        }
         let viewModel = NotchViewModel(
             nowPlaying: nowPlaying,
             audioRoute: audioRoute,
@@ -80,6 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchCommands.showShelf = { [weak viewModel] in viewModel?.showShelf() }
         notchCommands.showDeviceBatteries = { [weak viewModel] in viewModel?.showDeviceBatteries() }
         notchCommands.showMirror = { [weak viewModel] in viewModel?.showMirror() }
+        notchCommands.showWelcome = { [weak self] in
+            self?.showOnboarding(location: .installed, isFirstRun: true)
+        }
         notchController = NotchWindowController(viewModel: viewModel)
         menuBarItem.showSettings = { [weak self] in self?.showSettings?() }
         menuBarItem.onOpen = { [weak self] in
@@ -108,6 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bridge = AgentBridge { [weak agents] request in
             let prefixes = ["/claude/", "/codex/", "/cursor/"]
             guard prefixes.contains(where: { request.path.hasPrefix($0) }), let agents else { return .empty }
+            if request.path.hasPrefix("/codex/") {
+                CodexSetup.hookArrived()
+            }
             return await agents.handle(request)
         }
         do {
@@ -126,6 +140,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forEventClass: AEEventClass(kInternetEventClass),
             andEventID: AEEventID(kAEGetURL)
         )
+
+        Task { [weak self] in
+            await self?.showOnboardingIfNeeded()
+        }
+    }
+
+    // MARK: - Welcome
+
+    /// The first time MacCove opens, and whenever it's opened straight from
+    /// its disk image.
+    private func showOnboardingIfNeeded() async {
+        guard !MenuBarItem.isRunningForPreviews else { return }
+        let location = await InstallLocation.current()
+        let isFirstRun = !OnboardingModel.isCompleted
+        guard isFirstRun || location == .diskImage else { return }
+        showOnboarding(location: location, isFirstRun: isFirstRun)
+    }
+
+    /// Hangs the welcome from the notch, in the notch's place until it
+    /// folds back up.
+    private func showOnboarding(location: InstallLocation, isFirstRun: Bool) {
+        if let onboarding {
+            onboarding.bringForward()
+            return
+        }
+        let model = OnboardingModel(
+            installLocation: location,
+            isFirstRun: isFirstRun,
+            calendar: calendar,
+            xcode: xcode,
+            reminders: reminders,
+            mirror: mirror,
+            shelf: shelf,
+            deviceBatteries: deviceBatteries,
+            downloads: downloads,
+            github: github,
+            menuBarItem: menuBarItem,
+            setClipboardEnabled: { [weak self] enabled in
+                self?.setClipboardEnabled(enabled)
+            }
+        )
+        model.notchShape = { [weak self] in
+            guard let viewModel = self?.viewModel else { return nil }
+            let showsPill = !viewModel.hasPhysicalNotch && NotchSettings.noNotchVisibility == .always
+            guard viewModel.hasRunningActivities || showsPill else { return nil }
+            return viewModel.geometry
+        }
+        let controller = OnboardingWindowController(model: model)
+        controller.onWillClose = { [weak self] in
+            self?.notchController?.isSuspended = false
+        }
+        controller.onClose = { [weak self] in
+            self?.onboarding = nil
+            // Xcode's setup, if it's not done, carries on in the notch.
+            self?.xcode?.releaseGuide()
+        }
+        onboarding = controller
+        notchController?.isSuspended = true
+        controller.show()
     }
     
     func setClipboardEnabled(_ enabled: Bool) {
@@ -136,15 +209,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    func showGitHubSetup() {
-        GitHubSetup.showSetup(monitor: github)
-    }
-    
     @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, replyEvent: NSAppleEventDescriptor) {
         guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
               let url = URL(string: string) else { return }
-        if xcode?.handle(url) != true {
-            terminal?.handle(url)
+        if xcode?.handle(url) != true, terminal?.handle(url) == true {
+            // A shell has the hook loaded, which Set Up's guide waits for.
+            TerminalHook.commandArrived()
         }
     }
 }

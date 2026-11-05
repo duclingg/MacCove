@@ -60,10 +60,14 @@ enum CodexSetup: AgentSetupProtocol {
         Hook(event: "SessionEnd", timeout: 3),
     ]
 
+    static var hookEvents: [String] {
+        hooks.map(\.event)
+    }
+
     /// Writes the hook script and adds MacCove's hooks to Codex's hooks
     /// file, or brings an earlier setup up to date. The file is backed up
-    /// first, and other hooks stay as they are. Then says how to trust
-    /// them in Codex, which runs them from then on.
+    /// first, and other hooks stay as they are. Then the notch says how to
+    /// trust them in Codex, which runs them from then on.
     static func setup() {
         guard let file = readHooksOrSayWhy() else { return }
         do {
@@ -73,15 +77,49 @@ enum CodexSetup: AgentSetupProtocol {
                 try save(updated)
             }
         } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
+            NotchGuides.shared.show(.error(id: "codex-setup", icon: .tool(.codex), title: "Couldn’t set up Codex", error))
             return
         }
-        NSApp.activate()
-        let alert = NSAlert()
-        alert.messageText = "Trust MacCove’s Hooks in Codex"
-        alert.informativeText = "Codex runs a hook only once you’ve trusted it. In Codex, type /hooks and trust MacCove’s. It asks again whenever MacCove updates them."
-        alert.runModal()
+        showTrustGuide()
+    }
+
+    // MARK: - Trusting the hooks
+
+    static let trustGuideID = "codex-trust"
+
+    /// Codex runs a hook only once you've trusted it, so Set Up finishes
+    /// in the notch: the hooks are added, then they're trusted in Codex.
+    /// The first hook Codex runs ticks that off.
+    private static func showTrustGuide() {
+        NotchGuides.shared.show(NotchGuide(
+            id: trustGuideID,
+            icon: .tool(.codex),
+            title: "Trust MacCove’s hooks in Codex",
+            subtitle: "Codex runs a hook only once it’s trusted",
+            steps: [
+                NotchGuide.Step(id: "added", text: "Hooks added", detail: "In ~/.codex/hooks.json", isDone: true),
+                NotchGuide.Step(id: "trusted", text: "In Codex, type /hooks and trust MacCove’s", detail: "Ticks off when Codex first runs one", isWatching: true),
+            ],
+            actions: [
+                NotchGuide.Action(title: "Copy /hooks", finishes: false) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString("/hooks", forType: .string)
+                },
+                NotchGuide.Action(title: "Done", isPrimary: true) {},
+            ]
+        ))
+    }
+
+    /// A hook from Codex arrived, so they're trusted: the guide ticks it
+    /// off, then leaves.
+    static func hookArrived() {
+        let guides = NotchGuides.shared
+        guard guides.isShowing(trustGuideID) else { return }
+        guides.complete(step: "trusted", in: trustGuideID)
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            guides.finish(trustGuideID)
+        }
     }
 
     /// Takes MacCove's hooks back out of Codex's hooks file, leaving the
@@ -101,8 +139,7 @@ enum CodexSetup: AgentSetupProtocol {
             // they'd stay as they are.
             NotificationCenter.default.post(name: .agentHooksRemoved, object: AITool.codex)
         } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
+            NotchGuides.shared.show(.error(id: "codex-setup", icon: .tool(.codex), title: "Couldn’t take out Codex’s hooks", error))
         }
     }
 
@@ -156,11 +193,13 @@ enum CodexSetup: AgentSetupProtocol {
         do {
             return try readHooks()
         } catch {
-            NSApp.activate()
-            let alert = NSAlert()
-            alert.messageText = "MacCove Couldn’t Read Codex’s Hooks"
-            alert.informativeText = "~/.codex/hooks.json isn’t valid JSON, so MacCove left it alone. \(error.localizedDescription)"
-            alert.runModal()
+            NotchGuides.shared.show(.notice(
+                id: "codex-setup",
+                icon: .tool(.codex),
+                title: "Couldn’t read Codex’s settings",
+                message: "~/.codex/hooks.json isn’t valid JSON, so MacCove left it alone. \(error.localizedDescription)",
+                tone: .error
+            ))
             return nil
         }
     }

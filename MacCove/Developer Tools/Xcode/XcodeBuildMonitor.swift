@@ -79,8 +79,34 @@ final class XcodeBuildMonitor {
         }
     }
 
+    /// The setup guide Connect Xcode hands off to, so the steps stay in
+    /// view while Xcode's Settings window covers MacCove's. It takes the
+    /// notch's Xcode place while it's there, ahead of any build.
+    struct Guide: Equatable {
+        /// Shown in the welcome's card, which has the notch's place: it
+        /// stays open there until it's closed with Done, rather than
+        /// shrinking to the pill or leaving by itself.
+        var staysOpen = false
+        /// On the first step: getting to Behaviors in Xcode's Settings,
+        /// before any events. Every guide starts here.
+        var isAtStart = true
+        /// Groups passed over with Skip.
+        var skipped: Set<String> = []
+        /// macOS is asking to let MacCove control Xcode, after the first
+        /// script ran: the guide opens beside the prompt to explain it.
+        var isAsking = false
+        /// The event that ran last, shown while asking.
+        var lastEvent: String?
+    }
+
     /// What's being shown, `nil` once it has left the island.
     private(set) var build: Build?
+    private(set) var guide: Guide?
+
+    /// In the notch: a build, test run or run, or the setup guide.
+    var isShown: Bool {
+        build != nil || guide != nil
+    }
 
     @ObservationIgnored var onEvent: ((Event) -> Void)?
 
@@ -96,6 +122,8 @@ final class XcodeBuildMonitor {
     @ObservationIgnored private var detailsTask: Task<Void, Never>?
     @ObservationIgnored private var resultTask: Task<Void, Never>?
     @ObservationIgnored private var watchTask: Task<Void, Never>?
+    @ObservationIgnored private var guideTask: Task<Void, Never>?
+    @ObservationIgnored private var guideWatch: Task<Void, Never>?
 
     /// Returns whether the URL was one of the Xcode scripts'. Builds have
     /// the bare event ("started"), as the first scripts did; tests and runs
@@ -118,7 +146,145 @@ final class XcodeBuildMonitor {
         case "run-completed": runCompleted()
         default: break
         }
+        guideHeard(url.lastPathComponent)
         return true
+    }
+
+    // MARK: - Setup guide
+
+    var setup: XcodeSetupProgress { .shared }
+
+    /// The group the guide is on: the first with an event not added yet,
+    /// unless it was skipped. `nil` once there's nothing left to do.
+    var guideGroup: String? {
+        guard let guide else { return nil }
+        return XcodeBehaviorScripts.groups.first { group in
+            !guide.skipped.contains(group) && !setup.isGroupComplete(group)
+        }
+    }
+
+    func startGuide(staysOpen: Bool = false) {
+        guideTask?.cancel()
+        let wasShown = isShown
+        setup.refreshBehaviors()
+        guide = Guide(staysOpen: staysOpen)
+        watchBehaviors()
+        if !wasShown {
+            onEvent?(.started)
+        }
+        // Open for a moment, so it's seen, then the pill counts.
+        onEvent?(.failed)
+        if guideGroup == nil {
+            leaveGuideSoon()
+        }
+    }
+
+    /// The welcome has folded away: an unfinished guide carries on in the
+    /// notch like any other.
+    func releaseGuide() {
+        guard guide?.staysOpen == true else { return }
+        guide?.staysOpen = false
+        onEvent?(.failed)
+        if guideGroup == nil {
+            leaveGuideSoon()
+        }
+    }
+
+    func endGuide() {
+        guideTask?.cancel()
+        guideWatch?.cancel()
+        guard guide != nil else { return }
+        guide = nil
+        if build == nil {
+            onEvent?(.ended)
+        }
+    }
+
+    /// Xcode saves its Behaviors as they change, so each ticks off as
+    /// it's added, before Xcode has run it. Adding one also means you're
+    /// past the first step.
+    private func watchBehaviors() {
+        guideWatch?.cancel()
+        guideWatch = Task { [weak self] in
+            var last = self?.setup.added
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled, let self, self.guide != nil else { return }
+                self.setup.refreshBehaviors()
+                guard self.setup.added != last else { continue }
+                last = self.setup.added
+                self.guide?.isAtStart = false
+                if self.guideGroup == nil, self.guide?.isAsking != true {
+                    self.leaveGuideSoon()
+                }
+            }
+        }
+    }
+
+    /// Past the first step, to the events.
+    func continueGuide() {
+        guide?.isAtStart = false
+    }
+
+    func skip(_ group: String) {
+        guide?.skipped.insert(group)
+        if guideGroup == nil {
+            leaveGuideSoon()
+        }
+    }
+
+    /// While the guide's up, explains the prompt that the first script to
+    /// run brings up.
+    private func guideHeard(_ event: String) {
+        guard guide != nil else { return }
+        // A script ran, so Behaviors is open already.
+        guide?.isAtStart = false
+        guideTask?.cancel()
+        guideTask = Task { [weak self] in
+            await self?.explainPromptIfAsked(after: event)
+        }
+    }
+
+    /// Asking for the scheme's name is what brings the prompt up, and macOS
+    /// keeps it Not Asked until it's answered.
+    private func explainPromptIfAsked(after event: String) async {
+        await setup.refreshControl()
+        guard setup.isXcodeOpen, setup.control == .notAsked, guide != nil else {
+            guide?.isAsking = false
+            finishGuideIfDone()
+            return
+        }
+        guide?.isAsking = true
+        guide?.lastEvent = event
+        // Opens by itself, beside macOS's prompt.
+        onEvent?(.failed)
+        // Up to a minute for an answer.
+        for _ in 0..<60 {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, guide != nil else { return }
+            await setup.refreshControl()
+            if setup.control != .notAsked { break }
+        }
+        guide?.isAsking = false
+        finishGuideIfDone()
+    }
+
+    private func finishGuideIfDone() {
+        if guide != nil, guideGroup == nil {
+            leaveGuideSoon()
+        }
+    }
+
+    /// All set: a check, then it leaves.
+    private func leaveGuideSoon() {
+        // In the welcome, Done closes it.
+        guard guide?.staysOpen != true else { return }
+        guideTask?.cancel()
+        guideTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            self?.endGuide()
+        }
     }
 
     func dismiss() {

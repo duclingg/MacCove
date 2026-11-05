@@ -113,8 +113,7 @@ final class ClipboardMonitor {
     static func openAccessSettings() {
         // The pane's current identifier; the old com.apple.preference.security
         // one no longer opens anything.
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Pasteboard") else { return }
-        NSWorkspace.shared.open(url)
+        SystemSettings.openPrivacy("Privacy_Pasteboard")
     }
 
     /// Starts watching from what's on the pasteboard now, which was copied

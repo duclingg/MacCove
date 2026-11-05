@@ -69,53 +69,62 @@ enum TerminalHook {
         try? writeThreshold()
     }
 
-    /// Writes the hook (again, in case it's changed), then offers to add
-    /// the line that loads it to ~/.zshrc.
-    static func showSetup() {
+    /// Set Up: writes the hook (again, in case it's changed) and adds the
+    /// two lines that load it to the end of ~/.zshrc, after backing it up.
+    /// Clicking Set Up is the go-ahead, so there's nothing to confirm.
+    /// Shells already open don't have it yet, so the notch finishes the
+    /// setup: open a new window, or run exec zsh.
+    static func setUp() {
         do {
             try install()
+            let zshrc = (try? String(contentsOf: zshrcURL, encoding: .utf8)) ?? ""
+            if zshrc.contains(zshrcMarker) {
+                // Already loaded from its folder: the hook's just up to date.
+                return
+            }
+            if zshrc.contains(oldZshrcMarker) {
+                try moveFromOldFolder(zshrc)
+            } else {
+                try addToZshrc()
+            }
         } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
+            NotchGuides.shared.show(.error(id: reloadGuideID, icon: .tool(.terminal), title: "Couldn’t set up Terminal", error))
             return
         }
+        showReloadGuide()
+    }
 
-        let zshrc = (try? String(contentsOf: zshrcURL, encoding: .utf8)) ?? ""
-        let isAdded = zshrc.contains(zshrcMarker)
-        if !isAdded, zshrc.contains(oldZshrcMarker) {
-            moveFromOldFolder(zshrc)
-            return
-        }
+    static let reloadGuideID = "terminal-reload"
 
-        let alert = NSAlert()
-        alert.messageText = "Show Long Terminal Commands in the Island"
-        let about = """
-            Commands that run for \(threshold) seconds or more show in the island while they run, \
-            then pop up when they finish if their terminal is in the background. Only the command, \
-            its folder and its exit code reach MacCove, never its output.
-            """
-        if isAdded {
-            alert.informativeText = about + "\n\n~/.zshrc already loads MacCove’s hook. It’s up to date."
-            alert.addButton(withTitle: "OK")
-        } else {
-            alert.informativeText = about + """
+    private static func showReloadGuide() {
+        NotchGuides.shared.show(NotchGuide(
+            id: reloadGuideID,
+            icon: .tool(.terminal),
+            title: "Open a new terminal window",
+            subtitle: "Shells that are open don’t load the hook yet",
+            steps: [
+                NotchGuide.Step(id: "added", text: "Added to ~/.zshrc", detail: "Backed up beside it first", isDone: true),
+                NotchGuide.Step(id: "loaded", text: "Open a new window, or run exec zsh", detail: "Ticks off with the first command of \(threshold) s or more", isWatching: true),
+            ],
+            actions: [
+                NotchGuide.Action(title: "Copy exec zsh", finishes: false) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString("exec zsh", forType: .string)
+                },
+                NotchGuide.Action(title: "Done", isPrimary: true) {},
+            ]
+        ))
+    }
 
-
-                MacCove adds two lines to the end of ~/.zshrc to load its hook from \
-                \(ScriptsFolder.terminal.displayPath). Open a new terminal window afterwards, or run exec zsh.
-
-                Show in Terminal asks to let MacCove control Terminal or iTerm the first time.
-                """
-            alert.addButton(withTitle: "Add to .zshrc")
-            alert.addButton(withTitle: "Cancel")
-        }
-        NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn, !isAdded else { return }
-
-        do {
-            try addToZshrc()
-        } catch {
-            NSAlert(error: error).runModal()
+    /// A command reported in, so a shell has the hook: the guide ticks it
+    /// off, then leaves.
+    static func commandArrived() {
+        let guides = NotchGuides.shared
+        guard guides.isShowing(reloadGuideID) else { return }
+        guides.complete(step: "loaded", in: reloadGuideID)
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            guides.finish(reloadGuideID)
         }
     }
 
@@ -130,24 +139,9 @@ enum TerminalHook {
     /// Points ~/.zshrc's line at the hook in its own folder, and deletes
     /// the one straight in ~/Library/Scripts/MacCove. The hook was just
     /// written there by `install()`.
-    private static func moveFromOldFolder(_ zshrc: String) {
-        do {
-            try backUpAndWrite(zshrc.replacingOccurrences(of: oldHookPath, with: hookPath))
-            removeOldFiles()
-        } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
-            return
-        }
-        let alert = NSAlert()
-        alert.messageText = "MacCove’s Terminal Hook Moved"
-        alert.informativeText = """
-            Its scripts now have a folder for each app, so ~/.zshrc loads the hook from \
-            \(ScriptsFolder.terminal.displayPath) instead. Your ~/.zshrc was backed up beside itself first. \
-            Open a new terminal window, or run exec zsh, to load it from there.
-            """
-        NSApp.activate()
-        alert.runModal()
+    private static func moveFromOldFolder(_ zshrc: String) throws {
+        try backUpAndWrite(zshrc.replacingOccurrences(of: oldHookPath, with: hookPath))
+        removeOldFiles()
     }
 
     /// Through any symlink, so dotfiles kept elsewhere stay linked, after
@@ -182,8 +176,7 @@ enum TerminalHook {
             try? fileManager.removeItem(at: directory)
             removeOldFiles()
         } catch {
-            NSApp.activate()
-            NSAlert(error: error).runModal()
+            NotchGuides.shared.show(.error(id: reloadGuideID, icon: .tool(.terminal), title: "Couldn’t take MacCove out of ~/.zshrc", error))
         }
     }
 

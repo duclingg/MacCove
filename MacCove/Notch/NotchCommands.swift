@@ -16,4 +16,6 @@ final class NotchCommands {
     @ObservationIgnored var showShelf: () -> Void = {}
     @ObservationIgnored var showDeviceBatteries: () -> Void = {}
     @ObservationIgnored var showMirror: () -> Void = {}
+    /// The first-launch welcome, from the start.
+    @ObservationIgnored var showWelcome: () -> Void = {}
 }

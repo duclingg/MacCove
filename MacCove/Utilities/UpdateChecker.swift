@@ -130,24 +130,26 @@ final class UpdateChecker {
         NSWorkspace.shared.open(release.downloadURL ?? release.pageURL)
     }
 
-    /// Found by an automatic check: asked about, never downloaded on its own.
+    /// Found by an automatic check: offered in the notch, never downloaded
+    /// on its own.
     private func offer(_ release: Release) {
-        let alert = NSAlert()
-        alert.messageText = "MacCove \(release.version) Is Available"
-        let notes = Self.summary(of: release.notes)
-        alert.informativeText = "You have \(Self.currentVersion)." + (notes.isEmpty ? "" : "\n\n\(notes)")
-        alert.addButton(withTitle: "Download")
-        alert.addButton(withTitle: "Later")
-        alert.addButton(withTitle: "Skip This Version")
-        NSApp.activate()
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            download(release)
-        case .alertThirdButtonReturn:
-            UserDefaults.standard.set(release.version, forKey: Self.skippedVersionKey)
-        default:
-            break
-        }
+        let notes = Self.summary(of: release.notes, lines: 3)
+        NotchGuides.shared.show(NotchGuide(
+            id: "update",
+            icon: .app,
+            title: "MacCove \(release.version) is available",
+            subtitle: "You have \(Self.currentVersion)",
+            message: notes.isEmpty ? nil : notes,
+            actions: [
+                NotchGuide.Action(title: "Skip This Version") {
+                    UserDefaults.standard.set(release.version, forKey: Self.skippedVersionKey)
+                },
+                NotchGuide.Action(title: "Later") {},
+                NotchGuide.Action(title: "Download", isPrimary: true) { [weak self] in
+                    self?.download(release)
+                },
+            ]
+        ))
     }
 
     // MARK: - GitHub

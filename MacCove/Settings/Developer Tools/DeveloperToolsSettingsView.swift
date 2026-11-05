@@ -12,13 +12,17 @@ struct DeveloperToolsSettingsView: View {
     // MARK: States
     @Environment(GitHubMonitor.self) private var github
     @AppStorage(TerminalHook.thresholdKey) private var terminalThreshold = TerminalHook.defaultThreshold
-    @AppStorage(GitHubSetup.sourceKey) private var githubSource = ""
 
     @State private var installedTools: Set<AITool> = []
     @State private var toolsWithHooks: Set<AITool> = []
     @State private var isXcodeInstalled = false
     @State private var hasXcodeScripts = false
     @State private var hasTerminalHook = false
+    @State private var gitHubToken = ""
+    @State private var gitHubRepositories = GitHubSetup.repositories.joined(separator: ", ")
+    @State private var gitHubError: String?
+    /// Use Token was clicked, so its spinner is the one to show.
+    @State private var isUsingToken = false
 
     // MARK: View
     var body: some View {
@@ -38,10 +42,17 @@ struct DeveloperToolsSettingsView: View {
 
             Section {
                 gitHubRow
+                if isGitHubSignedIn {
+                    gitHubRepositoriesRow
+                } else {
+                    gitHubTokenRow
+                }
             } header: {
                 Text("Accounts")
             } footer: {
-                Text("Remove takes out only what Set Up added. A token you paste is kept in your login keychain.")
+                Text(isGitHubSignedIn
+                    ? "Remove takes out only what Set Up added. Leave Repositories empty to watch them all."
+                    : "Connect uses your GitHub CLI sign-in, and guides signing in with gh in the notch if there isn’t one. Or paste a fine-grained token with read access to pull requests, checks and commit statuses, plus write access to contents and actions for Merge and Re-run Failed. It’s kept in your login keychain.")
             }
         }
         .formStyle(.grouped)
@@ -69,7 +80,7 @@ struct DeveloperToolsSettingsView: View {
 
     private func refreshXcode() {
         isXcodeInstalled = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode") != nil
-        hasXcodeScripts = XcodeBehaviorScripts.isInstalled()
+        hasXcodeScripts = XcodeBehaviorScripts.isSetUp
     }
 
     // MARK: View Components
@@ -140,39 +151,98 @@ struct DeveloperToolsSettingsView: View {
                     tool.setup.setup()
                 }
                 refresh(tool)
+                if !hasHooks, toolsWithHooks.contains(tool) {
+                    Task { await tool.askForPermissions() }
+                }
             }
             .disabled(!hasHooks && !installedTools.contains(tool))
         }
     }
 
     // MARK: Editors and terminal
+    private var xcodeSetup: XcodeSetupProgress { .shared }
+
+    /// The row says what MacCove has heard from Xcode, so a half-done
+    /// setup is easy to finish: Set Up, in the notch, until every event is
+    /// added, then On. Controlling Xcode turned off says so first.
+    private enum XcodeState {
+        case notInstalled
+        case notSetUp
+        case cantControl
+        case partly
+        case on
+    }
+
+    private var xcodeState: XcodeState {
+        if !hasXcodeScripts {
+            return isXcodeInstalled ? .notSetUp : .notInstalled
+        }
+        if xcodeSetup.control == .denied { return .cantControl }
+        return xcodeSetup.isComplete ? .on : .partly
+    }
+
     private var xcodeDetail: String {
-        if hasXcodeScripts {
-            "\(XcodeBehaviorScripts.scriptCount) scripts in \(ScriptsFolder.xcode.displayPath)"
-        } else if isXcodeInstalled {
-            "Scripts for Xcode’s Behaviors"
-        } else {
-            "Install Xcode to use this"
+        switch xcodeState {
+        case .notInstalled: "Install Xcode to use this"
+        case .notSetUp: "Scripts for Xcode’s Behaviors"
+        case .cantControl: "Builds show without the scheme, Stop or Run"
+        case .partly:
+            xcodeSetup.count == 0
+                ? "Not added in Xcode’s Behaviors yet"
+                : "\(xcodeSetup.count) of \(xcodeSetup.total) added · \(xcodeSetup.summary)"
+        case .on: "\(XcodeBehaviorScripts.scriptCount) scripts in \(ScriptsFolder.xcode.displayPath)"
         }
     }
 
-    /// Xcode can only be pointed at the scripts from its own settings, so
-    /// Set Up writes them and says where they go, and there's nothing for
-    /// MacCove to remove.
     private var xcodeRow: some View {
-        toolRow("Xcode", icon: ToolIcon(.xcode), detail: xcodeDetail, isOn: hasXcodeScripts) {
-            if hasXcodeScripts {
+        HStack(spacing: 12) {
+            toolLabel("Xcode", detail: xcodeDetail) {
+                ToolIcon(.xcode)
+            }
+            Spacer(minLength: 0)
+            switch xcodeState {
+            case .on:
+                onStatus
+            case .partly:
+                statusDot("Partly set up", color: .orange)
+            case .cantControl:
+                statusDot("Can’t control Xcode", color: .red)
+            case .notSetUp, .notInstalled:
+                EmptyView()
+            }
+            switch xcodeState {
+            case .notSetUp, .notInstalled, .partly:
+                // Setting up happens in the notch, where the steps stay in
+                // view above Xcode's Settings; it picks up where it was.
+                Button("Set Up") {
+                    XcodeBehaviorScripts.guideInNotch()
+                    refreshXcode()
+                }
+                .disabled(xcodeState == .notInstalled)
+                .help("Shows the steps in the notch, where they stay in view above Xcode")
+            case .on:
                 Button("Show Scripts") {
                     XcodeBehaviorScripts.showScripts()
                 }
-            } else {
-                Button("Set Up") {
-                    XcodeBehaviorScripts.showSetup()
-                    refreshXcode()
+            case .cantControl:
+                Button("Open Privacy Settings") {
+                    AutomationPermission.openSettings()
                 }
-                .disabled(!isXcodeInstalled)
             }
         }
+        .task {
+            xcodeSetup.refreshBehaviors()
+            await xcodeSetup.refreshControl()
+        }
+    }
+
+    private func statusDot(_ text: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .frame(width: 8, height: 8)
+            Text(text)
+        }
+        .foregroundStyle(color)
     }
 
     /// The design's MacCove extension for VS Code doesn't exist yet.
@@ -192,12 +262,16 @@ struct DeveloperToolsSettingsView: View {
             isOn: hasTerminalHook
         ) {
             Button(hasTerminalHook ? "Remove" : "Set Up") {
+                let wasInstalled = hasTerminalHook
                 if hasTerminalHook {
                     TerminalHook.remove()
                 } else {
-                    TerminalHook.showSetup()
+                    TerminalHook.setUp()
                 }
                 hasTerminalHook = TerminalHook.isInstalled()
+                if !wasInstalled, hasTerminalHook {
+                    Task { await TerminalWindow.askToControl() }
+                }
             }
         }
     }
@@ -220,8 +294,10 @@ struct DeveloperToolsSettingsView: View {
     }
 
     // MARK: Accounts
+    /// From the moment GitHub accepts the sign-in, before the account's
+    /// details have loaded.
     private var isGitHubSignedIn: Bool {
-        !githubSource.isEmpty && !github.needsSignIn
+        GitHubConnection.shared.isConnected && !github.needsSignIn
     }
 
     private var gitHubDetail: String {
@@ -241,22 +317,87 @@ struct DeveloperToolsSettingsView: View {
         }
     }
 
-    /// Connecting and Repositories ask in their own windows, then update
-    /// the row through the monitor and the stored source.
+    /// Connecting happens here or in the notch, never in a window of its
+    /// own: Connect uses the GitHub CLI, the token row below takes a token.
     private var gitHubRow: some View {
         toolRow("GitHub", icon: ToolIcon(.gitHub), detail: gitHubDetail, isOn: isGitHubSignedIn) {
             if isGitHubSignedIn {
-                Button("Repositories…") {
-                    GitHubSetup.showSetup(monitor: github)
-                }
                 Button("Sign Out") {
                     GitHubSetup.signOut(monitor: github)
                 }
             } else {
-                Button(github.needsSignIn ? "Sign In…" : "Connect…") {
-                    GitHubSetup.showSetup(monitor: github)
+                // Signing in: the button gives way to a spinner until
+                // it's done, so there's one sign-in at a time.
+                if isWaitingForGitHub, !isUsingToken {
+                    Text(isGitHubSignInGuideShowing ? "Waiting for gh auth login" : "Signing in…")
+                        .foregroundStyle(.secondary)
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Button(github.needsSignIn ? "Sign In" : "Connect") {
+                        Task {
+                            await GitHubSetup.connect(monitor: github)
+                        }
+                    }
+                    .disabled(isWaitingForGitHub)
                 }
             }
+        }
+    }
+
+    /// The notch is guiding gh auth login, and connects once it's done.
+    private var isGitHubSignInGuideShowing: Bool {
+        NotchGuides.shared.isShowing(GitHubSetup.signInGuideID)
+    }
+
+    /// Checking a sign-in with GitHub, or waiting for one from gh.
+    private var isWaitingForGitHub: Bool {
+        GitHubConnection.shared.isBusy
+    }
+
+    /// Which repositories to watch, saved as you press Return or leave the
+    /// field.
+    private var gitHubRepositoriesRow: some View {
+        TextField("Repositories", text: $gitHubRepositories, prompt: Text("All repositories, or owner/name, owner/name"))
+            .onSubmit {
+                GitHubSetup.setRepositories(gitHubRepositories, monitor: github)
+            }
+            .onDisappear {
+                GitHubSetup.setRepositories(gitHubRepositories, monitor: github)
+            }
+    }
+
+    private var gitHubTokenRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                SecureField("Or use a token", text: $gitHubToken, prompt: Text("github_pat_…"))
+                    .onSubmit(connectWithToken)
+                if isUsingToken {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Button("Use Token", action: connectWithToken)
+                        .disabled(gitHubToken.isEmpty || isWaitingForGitHub)
+                }
+            }
+            if let gitHubError {
+                Text(gitHubError)
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func connectWithToken() {
+        guard !isWaitingForGitHub, !gitHubToken.isEmpty else { return }
+        isUsingToken = true
+        gitHubError = nil
+        Task {
+            gitHubError = await GitHubSetup.connect(token: gitHubToken, monitor: github)
+            if gitHubError == nil {
+                gitHubToken = ""
+            }
+            isUsingToken = false
         }
     }
 }

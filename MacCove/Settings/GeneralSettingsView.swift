@@ -17,6 +17,7 @@ struct GeneralSettingsView: View {
 
     // MARK: States
     @Environment(MenuBarItem.self) private var menuBar
+    @Environment(NotchCommands.self) private var notch
     @State private var launchAtLogin = LaunchAtLogin()
     @State private var isConfirmingReset = false
 
@@ -55,18 +56,27 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                // The first-launch welcome isn't built yet.
                 LabeledContent {
-                    Button("Show") {}
-                        .disabled(true)
+                    Button("Show") {
+                        notch.showWelcome()
+                    }
                 } label: {
                     Text("Show Welcome Again")
                     Text("Runs the setup from the first launch.")
                 }
-                LabeledContent("Reset all settings") {
-                    Button("Reset…", role: .destructive) {
-                        isConfirmingReset = true
+                // Clicked twice, like Merge in the notch: the first click
+                // says what goes, the second within a few seconds resets.
+                LabeledContent {
+                    Button(isConfirmingReset ? "Click Again to Reset" : "Reset…", role: .destructive) {
+                        if isConfirmingReset {
+                            ResetEverything.resetAndRelaunch()
+                        } else {
+                            isConfirmingReset = true
+                        }
                     }
+                } label: {
+                    Text("Reset all settings")
+                    Text(isConfirmingReset ? Self.resetDetail : "Takes out everything MacCove set up, then reopens it")
                 }
                 .tint(.red)
             }
@@ -76,42 +86,21 @@ struct GeneralSettingsView: View {
         .onAppear {
             launchAtLogin.refresh()
         }
-        .confirmationDialog("Reset All Settings?", isPresented: $isConfirmingReset) {
-            Button("Reset and Reopen MacCove", role: .destructive) {
-                Self.resetAndRelaunch()
-            }
-        } message: {
-            Text("Every setting goes back to how it was the first time MacCove opened, and MacCove reopens. GitHub stays signed in, and what you set up in Developer Tools stays set up.")
+        // Not clicked again in time: back to Reset….
+        .task(id: isConfirmingReset) {
+            guard isConfirmingReset else { return }
+            try? await Task.sleep(for: .seconds(5))
+            isConfirmingReset = false
         }
     }
 
-    /// Clears MacCove's settings, keeping the GitHub sign-in, then opens a
-    /// new MacCove and quits this one, so every monitor starts again from
-    /// its defaults rather than what it read at launch.
-    private static func resetAndRelaunch() {
-        let defaults = UserDefaults.standard
-        guard let domain = Bundle.main.bundleIdentifier else { return }
-        let kept = [GitHubSetup.sourceKey, GitHubSetup.repositoriesKey].compactMap { key in
-            defaults.object(forKey: key).map { (key, $0) }
-        }
-        defaults.removePersistentDomain(forName: domain)
-        for (key, value) in kept {
-            defaults.set(value, forKey: key)
-        }
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
-            Task { @MainActor in
-                NSApp.terminate(nil)
-            }
-        }
-    }
+    private static let resetDetail = "Takes out the hooks in Claude Code, Codex and Cursor, the lines in ~/.zshrc, Xcode’s Behaviors that run MacCove’s scripts, and the scripts themselves. Signs out of GitHub, removes the Low Power Mode helper and the login item, empties the shelf, and has macOS forget MacCove’s permissions, except Local Network, which macOS keeps: change that under Local Network in Privacy & Security. Then MacCove reopens to the welcome. Backups of other apps’ settings are kept."
 }
 
 #if DEBUG
 #Preview {
     GeneralSettingsView()
         .environment(MenuBarItem())
+        .environment(NotchCommands())
 }
 #endif

@@ -85,6 +85,17 @@ final class MenuBarItem {
         visibilityChanged(shown)
     }
 
+    /// Where the item is on screen, for the welcome to point at.
+    var frame: NSRect? {
+        guard isShown else { return nil }
+        return statusItem?.button?.window?.frame
+    }
+
+    /// Lit as though it were open, while the welcome points at it.
+    func setHighlighted(_ highlighted: Bool) {
+        statusItem?.button?.highlight(highlighted)
+    }
+
     private func visibilityChanged(_ shown: Bool) {
         if isShown != shown {
             isShown = shown

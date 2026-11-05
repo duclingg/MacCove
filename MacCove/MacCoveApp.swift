@@ -17,8 +17,6 @@ struct MacCoveApp: App {
     var body: some Scene {
         let _ = connectAppDelegate()
 
-        // The menu bar item is AppKit's, made by AppDelegate, so it can be
-        // hidden the way System Settings hides it.
         Window("Settings", id: Self.settingsWindowID) {
             SettingsView()
                 .frame(width: 800, height: 600)
@@ -38,15 +36,11 @@ struct MacCoveApp: App {
                 .environment(appDelegate.menuBarItem)
         }
         .windowResizability(.contentSize)
-        // Opens from the menu bar item or by opening MacCove again, not at
-        // launch.
         .defaultLaunchBehavior(.suppressed)
     }
 
     private static let settingsWindowID = "settings-window"
 
-    /// AppDelegate has no SwiftUI environment to open windows with, so opening MacCove again,
-    /// the way back to Settings once the menu bar item is hidden, comes through here.
     private func connectAppDelegate() {
         appDelegate.showSettings = showSettings
     }
@@ -54,10 +48,25 @@ struct MacCoveApp: App {
     private func showSettings() {
         openWindow(id: Self.settingsWindowID)
         Task { @MainActor in
-            NSApp.activate()
-            let window = NSApp.windows.first { $0.identifier?.rawValue.hasPrefix(Self.settingsWindowID) == true }
-            window?.makeKeyAndOrderFront(nil)
-            window?.orderFrontRegardless()
+            for _ in 0..<20 {
+                if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix(Self.settingsWindowID) == true }) {
+                    Self.bringForward(window)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(25))
+            }
         }
+    }
+
+    private static func bringForward(_ window: NSWindow) {
+        window.collectionBehavior.insert([.moveToActiveSpace, .fullScreenAuxiliary])
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.centerOnNotchScreen()
+        NSApp.unhide(nil)
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 }

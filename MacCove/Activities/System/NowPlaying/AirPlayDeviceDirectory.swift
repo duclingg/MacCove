@@ -16,9 +16,10 @@ import Network
 /// Bonjour (`_airplay._tcp`): `model` (`AudioAccessory5,1` is a HomePod mini)
 /// and status `flags`, which include a bit for an active receiver session.
 ///
-/// Browsing needs the user's Local Network permission, so the first time it
-/// only starts once audio actually goes to AirPlay. After that it starts at
-/// launch, so devices are already known when audio switches over.
+/// Browsing needs the user's Local Network permission, which is only asked
+/// for by Allow in the welcome: audio going to AirPlay never asks by itself.
+/// Once asked, it starts at launch, so devices are already known when audio
+/// switches over.
 @Observable
 final class AirPlayDeviceDirectory {
     nonisolated struct Device: Equatable {
@@ -45,6 +46,10 @@ final class AirPlayDeviceDirectory {
     /// Set in `features` by devices that can show video (AirPlay screen
     /// support): set on Apple TVs and TVs like a Roku TV, not on HomePods.
     nonisolated private static let screenFeature: UInt64 = 0x80
+
+    /// Set once Local Network has been asked for, in the welcome, after
+    /// which browsing starts at launch.
+    static let hasBrowsedKey = DefaultsKey.hasBrowsed
 
     private enum DefaultsKey {
         static let hasBrowsed = "AirPlayDeviceDirectory.hasBrowsed"
@@ -77,9 +82,10 @@ final class AirPlayDeviceDirectory {
         devices.values.filter(\.isReceiving).sorted { $0.name < $1.name }
     }
 
+    /// Browses once Local Network has been asked for; until then, does
+    /// nothing, so macOS's prompt never comes out of the blue.
     func startIfNeeded() {
-        guard browser == nil else { return }
-        UserDefaults.standard.set(true, forKey: DefaultsKey.hasBrowsed)
+        guard browser == nil, UserDefaults.standard.bool(forKey: DefaultsKey.hasBrowsed) else { return }
 
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_airplay._tcp", domain: nil), using: .tcp)
         browser.browseResultsChangedHandler = { [weak self] results, _ in

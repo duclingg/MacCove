@@ -12,6 +12,9 @@ protocol AgentSetupProtocol {
     static func remove()
     static func isInstalled() -> Bool
     static func hooksSetup() -> Bool
+    /// The events Set Up adds a hook for, in order, for the welcome to
+    /// show before it changes anything.
+    static var hookEvents: [String] { get }
 }
 
 extension Notification.Name {

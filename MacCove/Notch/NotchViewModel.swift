@@ -52,13 +52,16 @@ enum IslandActivity: Hashable {
     /// Files dropped on the notch, or a file drag on its way to it.
     case shelf
     case nowPlaying
+    /// The rest of a setup that takes more than one step, or something
+    /// MacCove has to say, in place of an alert.
+    case guide
 
     /// How long a battery alert stays; the others leave by themselves.
     var duration: Duration {
         switch self {
         case .charging: .seconds(3)
         case .lowBattery: .seconds(6)
-        case .signIn, .xcode, .terminal, .codingAgent, .github, .downloads, .clipboard, .calendar, .reminders, .deviceBatteries, .mirror, .shelf, .nowPlaying: .zero
+        case .signIn, .xcode, .terminal, .codingAgent, .github, .downloads, .clipboard, .calendar, .reminders, .deviceBatteries, .mirror, .shelf, .nowPlaying, .guide: .zero
         }
     }
 }
@@ -111,6 +114,8 @@ final class NotchViewModel {
     let battery: BatteryMonitor
     let signIn: SignInMonitor
     let xcode: XcodeBuildMonitor
+    /// Setups finishing in the notch, and notices, one at a time.
+    let guides = NotchGuides.shared
     let terminal: TerminalCommandMonitor
     let agents: AgentMonitor
     let github: GitHubMonitor
@@ -237,6 +242,12 @@ final class NotchViewModel {
         xcode.onEvent = { [weak self] event in
             self?.xcodeEvent(event)
         }
+        guides.onEvent = { [weak self] event in
+            switch event {
+            case .shown: self?.activityFailed(.guide)
+            case .ended: self?.activityEnded(.guide)
+            }
+        }
         terminal.onEvent = { [weak self] event in
             self?.terminalEvent(event)
         }
@@ -340,6 +351,15 @@ final class NotchViewModel {
         Array(runningActivities.prefix(maxActivities))
     }
 
+    var hasRunningActivities: Bool {
+        !runningActivities.isEmpty
+    }
+
+    /// While the welcome has the notch's place: the island keeps its shape,
+    /// which the welcome folds into, with what's in it and the bubbles
+    /// beside it hidden, to come in as it hands over.
+    var isContentHidden = false
+
     /// Running past those, stacked as mini icons in the right bubble.
     var overflowActivities: [IslandActivity] {
         Array(runningActivities.dropFirst(maxActivities))
@@ -373,6 +393,10 @@ final class NotchViewModel {
         if agents.needsAnswer {
             running.append(.codingAgent)
         }
+        // Asked for just now, by Set Up or by something going wrong.
+        if isShowingAll, guides.current != nil {
+            running.append(.guide)
+        }
         if isShowingAll, clipboard.shown != nil {
             running.append(.clipboard)
         }
@@ -381,7 +405,7 @@ final class NotchViewModel {
         if isShowingAll, mirror.isOpen {
             running.append(.mirror)
         }
-        if isShowingAll, xcode.build != nil {
+        if isShowingAll, xcode.isShown {
             running.append(.xcode)
         }
         if isShowingAll, agents.session != nil, !agents.needsAnswer {
@@ -506,12 +530,13 @@ final class NotchViewModel {
         case .compact:
             let width = switch primary {
             case .charging?: Self.chargingWidth(notch: notch)
-            case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
+            case .xcode?: XcodeCompactView.width(for: xcode, notch: notch)
             case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
             case .calendar?: CalendarCompactView.width(for: calendar, notch: notch)
             case .reminders?: RemindersCompactView.width(for: reminders, notch: notch)
             case .deviceBatteries?: DeviceBatteryCompactView.width(for: deviceBatteries, notch: notch)
             case .shelf?: ShelfCompactView.width(for: shelf, notch: notch)
+            case .guide?: NotchGuideCompactView.width(for: guides, notch: notch)
             case .codingAgent?: Self.compactWidth(notch: notch)
             default: Self.compactWidth(notch: notch)
             }
@@ -523,7 +548,7 @@ final class NotchViewModel {
         case .expanded:
             let body = switch primary {
             case .nowPlaying?: Self.expandedBodyHeight
-            case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
+            case .xcode?: XcodeExpandedView.bodyHeight(for: xcode)
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
             case .codingAgent?: AgentExpandedView.bodyHeight(for: agents.session)
             case .github?: GitHubExpandedView.bodyHeight(for: github)
@@ -534,6 +559,7 @@ final class NotchViewModel {
             case .deviceBatteries?: DeviceBatteryExpandedView.bodyHeight(for: deviceBatteries)
             case .mirror?: MirrorExpandedView.bodyHeight
             case .shelf?: ShelfExpandedView.bodyHeight(for: shelf)
+            case .guide?: NotchGuideExpandedView.bodyHeight(for: guides)
             default: BatteryExpandedView.bodyHeight
             }
             return IslandGeometry(size: CGSize(width: Self.expandedWidth, height: notch.height + body), cornerRadius: Self.expandedCornerRadius, isLifted: true)
@@ -549,7 +575,7 @@ final class NotchViewModel {
     /// icons beside the second, always on the right; without room on the
     /// left, the third joins the stack.
     var bubbles: [IslandBubble] {
-        guard state == .compact, appMenus?.spillsPastCentre != true else { return [] }
+        guard state == .compact, appMenus?.spillsPastCentre != true, !isContentHidden else { return [] }
         var trailing = Array(activities.dropFirst())
         guard let second = trailing.first else { return [] }
         let overflow = overflowActivities
@@ -781,14 +807,16 @@ final class NotchViewModel {
         case .signIn, .charging, .lowBattery, .mirror: false
         case .codingAgent: !agents.needsAnswer
         case .shelf: shelf.dragPhase == nil
-        case .xcode, .terminal, .github, .downloads, .clipboard, .calendar, .reminders, .deviceBatteries, .nowPlaying: true
+        case .xcode, .terminal, .github, .downloads, .clipboard, .calendar, .reminders, .deviceBatteries, .nowPlaying, .guide: true
         }
     }
 
     /// Whether what the activity comes from is in front: Xcode, Calendar,
     /// Reminders, the app playing, or the terminal tab a command or coding
     /// agent runs in. Any tab of that terminal when it can't say which. An
-    /// agent waiting for your answer stays, since its buttons answer it.
+    /// agent waiting for your answer stays, since its buttons answer it,
+    /// and so does Xcode's setup guide, which is there to be read above
+    /// Xcode's Settings.
     private func isInFront(_ activity: IslandActivity) -> Bool {
         guard let front = frontApp, let frontID = front.bundleIdentifier else { return false }
         func isFront(_ app: String?, tty: String?) -> Bool {
@@ -797,13 +825,13 @@ final class NotchViewModel {
             return tty == frontTTY
         }
         switch activity {
-        case .xcode: return frontID == XcodeScripting.bundleIdentifier
+        case .xcode: return xcode.guide == nil && frontID == XcodeScripting.bundleIdentifier
         case .terminal: return isFront(terminal.command?.appBundleIdentifier, tty: terminal.command?.tty)
         case .codingAgent: return !agents.needsAnswer && isFront(agents.session?.appBundleIdentifier, tty: agents.session?.tty)
         case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier
         case .calendar: return frontID == CalendarMonitor.appBundleIdentifier
         case .reminders: return frontID == RemindersMonitor.appBundleIdentifier
-        case .github, .downloads, .clipboard, .deviceBatteries, .mirror, .shelf, .signIn, .charging, .lowBattery: return false
+        case .github, .downloads, .clipboard, .deviceBatteries, .mirror, .shelf, .signIn, .charging, .lowBattery, .guide: return false
         }
     }
 

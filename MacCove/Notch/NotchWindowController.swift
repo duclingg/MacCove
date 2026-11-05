@@ -28,8 +28,37 @@ final class NotchWindowController {
     private var eventMonitors: [Any] = []
     private var screenObserver: NSObjectProtocol?
     private var settingsObserver: NSObjectProtocol?
-    /// Off on a display without a notch when Displays says Never.
+    /// Off on a display without a notch when Displays says Never, and
+    /// while suspended.
     private var isPanelShown = true
+    /// Out of the way while the welcome hangs from the notch in its place.
+    var isSuspended = false {
+        didSet {
+            guard isSuspended != oldValue else { return }
+            guard !isSuspended else {
+                // The shape the welcome folds into, with nothing in it yet.
+                viewModel.isContentHidden = true
+                reposition()
+                return
+            }
+            // Back as it is now, in the shape the welcome folded into. Clear
+            // until it's drawn, so the picture it had when it was hidden
+            // can't flash up first.
+            panel.alphaValue = 0
+            reposition()
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self else { return }
+                self.panel.alphaValue = 1
+                // Once the welcome's window has gone from over it: what's
+                // running fades in, and its bubbles split off the sides.
+                try? await Task.sleep(for: .milliseconds(60))
+                withAnimation(.island) {
+                    self.viewModel.isContentHidden = false
+                }
+            }
+        }
+    }
     private var workspaceObservers: [NSObjectProtocol] = []
     private var fullScreenCheck: Task<Void, Never>?
     private var menuMeasurement: Task<Void, Never>?
@@ -55,9 +84,6 @@ final class NotchWindowController {
         var isDone = false
     }
 
-    /// Accessibility is asked for once, the first time a bubble needs a
-    /// place; after that it's up to System Settings.
-    private static let askedForAccessibilityKey = "AskedForMenuBarAccessibility"
     /// An app that has just come to the front may not have laid out its
     /// menus yet, and Accessibility then reports few or none: measured
     /// again after each of these.
@@ -208,17 +234,13 @@ final class NotchWindowController {
     }
 
     /// Where the front app's menus reach, so bubbles stay clear of them.
-    /// Only needed once there are bubbles, and only then is Accessibility
-    /// asked for.
+    /// Only needed once there are bubbles. Accessibility is never asked for
+    /// here: that's Allow in the welcome, or Settings › Permissions.
     private func measureAppMenus() {
         menuMeasurement?.cancel()
         guard let screen, viewModel.activities.count > 1 else { return }
         guard AppMenuExtent.isAllowed else {
             viewModel.appMenus = nil
-            if !UserDefaults.standard.bool(forKey: Self.askedForAccessibilityKey) {
-                UserDefaults.standard.set(true, forKey: Self.askedForAccessibilityKey)
-                AppMenuExtent.requestPermission()
-            }
             return
         }
         // MacCove itself is in front while its menu is open; its menus are
@@ -290,7 +312,7 @@ final class NotchWindowController {
     /// that's changed, since it runs on every change to the settings.
     private func reposition() {
         guard let screen = NotchSettings.screen else { return }
-        let shows = screen.hasNotch || NotchSettings.noNotchVisibility != .never
+        let shows = !isSuspended && (screen.hasNotch || NotchSettings.noNotchVisibility != .never)
         if shows != isPanelShown {
             isPanelShown = shows
             if shows {
@@ -437,7 +459,7 @@ final class NotchWindowController {
     /// the last one back. Once per swipe, and only for swipes that start on
     /// the notch, mostly sideways. The momentum after lifting doesn't count.
     private func handleScroll(_ event: ScrollSample) {
-        guard let screen, event.isTrackpad, !event.isMomentum else { return }
+        guard let screen, isPanelShown, event.isTrackpad, !event.isMomentum else { return }
         if event.began {
             let mouse = NSEvent.mouseLocation
             // With nothing showing, the whole notch is somewhere to swipe

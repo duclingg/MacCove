@@ -41,7 +41,7 @@ final class LowPowerModeHelperClient {
             try? service.register()
         }
         if service.status == .requiresApproval {
-            SMAppService.openSystemSettingsLoginItems()
+            SystemSettings.openLoginItems()
         }
         return service.status == .enabled
     }

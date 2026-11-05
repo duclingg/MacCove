@@ -6,7 +6,25 @@
 //
 
 import AppKit
+import Observation
 import Security
+
+/// Where connecting GitHub has got, for Settings and the welcome alike:
+/// one connect at a time, from either, and connected the moment GitHub
+/// accepts the sign-in, before the account's details have loaded.
+@Observable
+final class GitHubConnection {
+    static let shared = GitHubConnection()
+
+    /// Reading the GitHub CLI's sign-in, or checking a sign-in with GitHub.
+    fileprivate(set) var isConnecting = false
+    fileprivate(set) var isConnected = GitHubSetup.source != nil
+
+    /// Connecting, or waiting in the notch for gh auth login.
+    var isBusy: Bool {
+        isConnecting || NotchGuides.shared.isShowing(GitHubSetup.signInGuideID)
+    }
+}
 
 /// Signs MacCove in to GitHub, with the GitHub CLI's sign-in or a token
 /// pasted in, and picks the repositories to watch.
@@ -42,53 +60,24 @@ enum GitHubSetup {
         }
     }
 
-    static func showSetup(monitor: GitHubMonitor) {
-        Task {
-            if source != nil, !monitor.needsSignIn {
-                showSignedIn(monitor: monitor)
-            } else {
-                await connect(monitor: monitor)
-            }
-        }
-    }
-
     // MARK: - Signed in
 
-    private static func showSignedIn(monitor: GitHubMonitor) {
-        let alert = NSAlert()
-        alert.messageText = "GitHub in MacCove"
-        let account = monitor.login.map { "Signed in as \($0)" } ?? "Signed in"
-        let how = source == .cli ? "with your GitHub CLI sign-in" : "with a token"
-        alert.informativeText = """
-            \(account) \(how). The notch shows checks running on your pull requests, opens when one fails, \
-            and says when one is ready to merge or someone asks for your review.
-
-            Repositories to watch, as owner/name separated by commas. Leave it empty to watch them all.
-            """
-        let field = NSTextField(string: repositories.joined(separator: ", "))
-        field.placeholderString = "All repositories"
-        field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Done")
-        alert.addButton(withTitle: "Sign Out")
-
-        NSApp.activate()
-        let choice = alert.runModal()
-        if choice == .alertSecondButtonReturn {
-            signOut(monitor: monitor)
-            return
-        }
-        let picked = field.stringValue
+    /// From Settings: "owner/name" each, separated by commas or spaces.
+    /// Empty watches them all.
+    static func setRepositories(_ text: String, monitor: GitHubMonitor) {
+        let picked = text
             .split(whereSeparator: { $0 == "," || $0.isWhitespace })
             .map { String($0) }
             .filter { $0.contains("/") }
-        if picked != repositories {
-            UserDefaults.standard.set(picked, forKey: repositoriesKey)
-            monitor.restart()
-        }
+        guard picked != repositories else { return }
+        UserDefaults.standard.set(picked, forKey: repositoriesKey)
+        monitor.restart()
     }
 
     static func signOut(monitor: GitHubMonitor) {
+        signInWatch?.cancel()
+        NotchGuides.shared.finish(signInGuideID)
+        GitHubConnection.shared.isConnected = false
         GitHubKeychain.token = nil
         UserDefaults.standard.removeObject(forKey: sourceKey)
         monitor.stop()
@@ -96,74 +85,110 @@ enum GitHubSetup {
 
     // MARK: - Connecting
 
-    private static func connect(monitor: GitHubMonitor) async {
-        let cliToken = await GitHubCLI.token()
+    static let signInGuideID = "github-sign-in"
+    private static var signInWatch: Task<Void, Never>?
 
-        let alert = NSAlert()
-        alert.messageText = monitor.needsSignIn ? "Sign In to GitHub Again" : "Connect GitHub"
-        var text = """
-            The notch shows checks running on your open pull requests, opens when one fails, and says when one \
-            is ready to merge or someone asks for your review. MacCove checks every 30 to 60 seconds and only \
-            changes anything when you click Merge or Re-run Failed.
-            """
-        if cliToken == nil {
-            text += "\n\nTo use your GitHub CLI sign-in, run gh auth login in a terminal first. Or use a token."
-        }
-        alert.informativeText = text
-        if cliToken != nil {
-            alert.addButton(withTitle: "Use GitHub CLI Sign-In")
-        }
-        alert.addButton(withTitle: "Use a Token…")
-        alert.addButton(withTitle: "Cancel")
-
-        NSApp.activate()
-        let choice = alert.runModal()
-        let usesCLI = cliToken != nil && choice == .alertFirstButtonReturn
-        let usesToken = cliToken != nil ? choice == .alertSecondButtonReturn : choice == .alertFirstButtonReturn
-
-        if usesCLI, let cliToken {
-            await finishConnecting(with: cliToken, source: .cli, monitor: monitor)
-        } else if usesToken, let token = askForToken() {
-            await finishConnecting(with: token, source: .token, monitor: monitor)
+    /// Connect, from Settings or the welcome. With the GitHub CLI signed
+    /// in, that's the one step. Without, signing in takes more, so the
+    /// notch guides it and MacCove connects as soon as `gh` has a sign-in.
+    /// A token is pasted in Settings instead.
+    static func connect(monitor: GitHubMonitor) async {
+        let connection = GitHubConnection.shared
+        // One at a time: a second click while this goes does nothing.
+        guard !connection.isBusy else { return }
+        connection.isConnecting = true
+        defer { connection.isConnecting = false }
+        if let token = await GitHubCLI.token() {
+            if let reason = await finishConnecting(with: token, source: .cli, monitor: monitor) {
+                NotchGuides.shared.show(.notice(id: signInGuideID, icon: .tool(.gitHub), title: "Couldn’t sign in to GitHub", message: reason, tone: .error))
+            }
+        } else {
+            showSignInGuide(monitor: monitor)
         }
     }
 
-    private static func askForToken() -> String? {
-        let alert = NSAlert()
-        alert.messageText = "Paste a GitHub Token"
-        alert.informativeText = """
-            A fine-grained token needs read access to pull requests, checks and commit statuses on the \
-            repositories to watch. For Merge and Re-run Failed, also give it write access to contents and \
-            actions. It’s kept in your keychain.
-            """
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        field.placeholderString = "github_pat_…"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Connect")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-
-        NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        let token = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return token.isEmpty ? nil : token
+    /// With a token pasted in Settings. Returns why it didn't work, to show
+    /// beside the field.
+    static func connect(token: String, monitor: GitHubMonitor) async -> String? {
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return "Paste a token first." }
+        let connection = GitHubConnection.shared
+        guard !connection.isBusy else { return nil }
+        connection.isConnecting = true
+        defer { connection.isConnecting = false }
+        return await finishConnecting(with: token, source: .token, monitor: monitor)
     }
 
-    /// Only kept once GitHub has accepted it.
-    private static func finishConnecting(with token: String, source: Source, monitor: GitHubMonitor) async {
+    /// Only kept once GitHub has accepted it. Returns why not.
+    @discardableResult
+    private static func finishConnecting(with token: String, source: Source, monitor: GitHubMonitor) async -> String? {
         do {
             _ = try await GitHubAPI(token: token).viewerLogin()
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "MacCove Couldn’t Sign In to GitHub"
-            alert.informativeText = error.localizedDescription
-            NSApp.activate()
-            alert.runModal()
-            return
+            return error.localizedDescription
         }
         GitHubKeychain.token = source == .token ? token : nil
         UserDefaults.standard.set(source.rawValue, forKey: sourceKey)
+        GitHubConnection.shared.isConnected = true
         monitor.restart()
+        return nil
+    }
+
+    /// Sign in with `gh auth login` in a terminal; MacCove looks for the
+    /// sign-in every few seconds and connects once it's there.
+    private static func showSignInGuide(monitor: GitHubMonitor) {
+        let guides = NotchGuides.shared
+        let id = signInGuideID
+        guides.show(NotchGuide(
+            id: id,
+            icon: .tool(.gitHub),
+            title: monitor.needsSignIn ? "Sign in to GitHub again" : "Sign in to GitHub",
+            subtitle: "With the GitHub CLI, then MacCove connects",
+            steps: [
+                NotchGuide.Step(
+                    id: "login",
+                    text: "In a terminal, run gh auth login",
+                    detail: GitHubCLI.isInstalled ? "Or paste a token in Settings › Developer Tools" : "Install it first: brew install gh",
+                    isWatching: true
+                ),
+                NotchGuide.Step(id: "connected", text: "MacCove connects by itself", detail: "Once gh has your sign-in"),
+            ],
+            actions: [
+                NotchGuide.Action(title: "Copy Command", finishes: false) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(GitHubCLI.isInstalled ? "gh auth login" : "brew install gh && gh auth login", forType: .string)
+                },
+                NotchGuide.Action(title: "Cancel") {
+                    signInWatch?.cancel()
+                },
+            ]
+        ))
+        signInWatch?.cancel()
+        signInWatch = Task {
+            // Up to ten minutes.
+            for _ in 0..<200 {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled, guides.isShowing(id) else { return }
+                guard let token = await GitHubCLI.token() else { continue }
+                guides.complete(step: "login", in: id)
+                // Checking the sign-in with GitHub.
+                guides.watch(step: "connected", in: id)
+                if let reason = await finishConnecting(with: token, source: .cli, monitor: monitor) {
+                    guides.finish(id)
+                    guides.show(.notice(id: id, icon: .tool(.gitHub), title: "Couldn’t sign in to GitHub", message: reason, tone: .error))
+                    return
+                }
+                guides.complete(step: "connected", in: id)
+                guides.update(id) { guide in
+                    guide.title = "GitHub is connected"
+                    guide.subtitle = "Pull requests show in the notch"
+                    guide.actions = [NotchGuide.Action(title: "Done", isPrimary: true) {}]
+                }
+                try? await Task.sleep(for: .seconds(4))
+                guides.finish(id)
+                return
+            }
+        }
     }
 }
 
@@ -178,6 +203,10 @@ nonisolated enum GitHubCLI {
         "/run/current-system/sw/bin/gh",
         URL.homeDirectory.appending(path: ".local/bin/gh").path(percentEncoded: false),
     ]
+
+    static var isInstalled: Bool {
+        candidatePaths.contains { FileManager.default.isExecutableFile(atPath: $0) }
+    }
 
     static func token() async -> String? {
         await Task.detached(priority: .utility) { readToken() }.value

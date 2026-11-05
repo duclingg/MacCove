@@ -5,6 +5,7 @@
 //  Created by Justin Hoang on 11/4/26.
 //
 
+import CoreGraphics
 import SwiftUI
 
 enum AITool: String, CaseIterable {
@@ -38,6 +39,18 @@ enum AITool: String, CaseIterable {
     /// Cursor's agent mostly runs in its own app, where it doesn't.
     var canStop: Bool {
         self != .cursor
+    }
+
+    /// After Set Up: what Stop and bringing the terminal forward need,
+    /// asked for now rather than the first time they're used. Esc is sent
+    /// as a key press, which needs Accessibility, and Terminal and iTerm
+    /// are told which tab to bring forward.
+    func askForPermissions() async {
+        guard canStop else { return }
+        if !CGPreflightPostEventAccess() {
+            CGRequestPostEventAccess()
+        }
+        await TerminalWindow.askToControl()
     }
 
     var path: String {
