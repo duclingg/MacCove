@@ -90,6 +90,46 @@ final class XcodeSetupProgress {
         }
     }
 
+    /// For Reset All Settings: turns off Run wherever a Behavior runs one
+    /// of MacCove's scripts, in every Xcode version's Behaviors, and drops
+    /// them from Xcode's recent scripts. Other Behaviors stay as they are.
+    static func removeFromXcode() {
+        CFPreferencesAppSynchronize(xcodeDomain)
+        guard let keys = CFPreferencesCopyKeyList(xcodeDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String] else {
+            return
+        }
+        for key in keys where key.hasPrefix(alertEventsPrefix) {
+            guard var events = CFPreferencesCopyAppValue(key as CFString, xcodeDomain) as? [String: Any] else { continue }
+            var changed = false
+            for (name, value) in events {
+                guard var event = value as? [String: Any],
+                      let runScript = event["Xcode.Alert.RunScript"] as? [String: Any],
+                      let path = runScript["path"] as? String,
+                      isInMacCoveFolder(path) else { continue }
+                event["Xcode.Alert.RunScript"] = nil
+                events[name] = event.isEmpty ? nil : event
+                changed = true
+            }
+            if changed {
+                CFPreferencesSetAppValue(key as CFString, events as NSDictionary, xcodeDomain)
+            }
+        }
+        let recentKey = "Xcode.Alert.Script.Recent" as CFString
+        if let recent = CFPreferencesCopyAppValue(recentKey, xcodeDomain) as? [String] {
+            let kept = recent.filter { !isInMacCoveFolder($0) }
+            if kept.count != recent.count {
+                CFPreferencesSetAppValue(recentKey, kept as NSArray, xcodeDomain)
+            }
+        }
+        CFPreferencesAppSynchronize(xcodeDomain)
+    }
+
+    /// Anywhere MacCove has kept Xcode's scripts, now or before.
+    private static func isInMacCoveFolder(_ path: String) -> Bool {
+        let decoded = path.removingPercentEncoding ?? path
+        return decoded.contains("/Library/Scripts/MacCove/") || decoded.contains("/Library/Application Support/MacCove/")
+    }
+
     /// The Behaviors of the newest Xcode that has saved any.
     private static func currentAlertEvents() -> [String: Any]? {
         guard let keys = CFPreferencesCopyKeyList(xcodeDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String] else {

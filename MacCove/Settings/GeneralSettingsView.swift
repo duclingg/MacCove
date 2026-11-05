@@ -79,33 +79,10 @@ struct GeneralSettingsView: View {
         }
         .confirmationDialog("Reset All Settings?", isPresented: $isConfirmingReset) {
             Button("Reset and Reopen MacCove", role: .destructive) {
-                Self.resetAndRelaunch()
+                ResetEverything.resetAndRelaunch()
             }
         } message: {
-            Text("Every setting goes back to how it was the first time MacCove opened, and MacCove reopens. GitHub stays signed in, and what you set up in Developer Tools stays set up.")
-        }
-    }
-
-    /// Clears MacCove's settings, keeping the GitHub sign-in, then opens a
-    /// new MacCove and quits this one, so every monitor starts again from
-    /// its defaults rather than what it read at launch.
-    private static func resetAndRelaunch() {
-        let defaults = UserDefaults.standard
-        guard let domain = Bundle.main.bundleIdentifier else { return }
-        let kept = [GitHubSetup.sourceKey, GitHubSetup.repositoriesKey, XcodeBehaviorScripts.setUpKey].compactMap { key in
-            defaults.object(forKey: key).map { (key, $0) }
-        }
-        defaults.removePersistentDomain(forName: domain)
-        for (key, value) in kept {
-            defaults.set(value, forKey: key)
-        }
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
-            Task { @MainActor in
-                NSApp.terminate(nil)
-            }
+            Text("MacCove takes out everything it set up: the hooks in Claude Code, Codex and Cursor, the lines in ~/.zshrc, Xcode’s Behaviors that run its scripts, and the scripts themselves. GitHub is signed out, the Low Power Mode helper and the login item are removed, the shelf is emptied, and macOS forgets the permissions it gave MacCove. Then MacCove reopens to the welcome. Backups of other apps’ settings are kept.")
         }
     }
 }
