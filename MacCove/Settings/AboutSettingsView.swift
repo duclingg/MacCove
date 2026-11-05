@@ -13,6 +13,8 @@ import SwiftUI
 struct AboutSettingsView: View {
     private static let repositoryURL = URL(string: "https://github.com/\(UpdateChecker.repository)")!
 
+    @Environment(NotchCommands.self) private var notch
+
     var body: some View {
         VStack(spacing: 0) {
             Image(nsImage: NSApp.applicationIconImage)
@@ -43,9 +45,9 @@ struct AboutSettingsView: View {
                 Button("Report a Bug") {
                     NSWorkspace.shared.open(Self.newIssueURL)
                 }
-                // The first-launch welcome isn't built yet.
-                Button("Show Welcome Again") {}
-                    .disabled(true)
+                Button("Show Welcome Again") {
+                    notch.showWelcome()
+                }
             }
             .padding(.top, 18)
 
@@ -87,6 +89,7 @@ struct AboutSettingsView: View {
 #if DEBUG
 #Preview {
     AboutSettingsView()
+        .environment(NotchCommands())
         .frame(width: 600, height: 500)
 }
 #endif

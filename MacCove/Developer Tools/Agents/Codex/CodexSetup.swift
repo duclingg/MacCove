@@ -60,6 +60,10 @@ enum CodexSetup: AgentSetupProtocol {
         Hook(event: "SessionEnd", timeout: 3),
     ]
 
+    static var hookEvents: [String] {
+        hooks.map(\.event)
+    }
+
     /// Writes the hook script and adds MacCove's hooks to Codex's hooks
     /// file, or brings an earlier setup up to date. The file is backed up
     /// first, and other hooks stay as they are. Then says how to trust

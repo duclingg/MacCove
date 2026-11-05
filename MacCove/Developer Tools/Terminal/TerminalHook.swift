@@ -104,7 +104,8 @@ enum TerminalHook {
                 MacCove adds two lines to the end of ~/.zshrc to load its hook from \
                 \(ScriptsFolder.terminal.displayPath). Open a new terminal window afterwards, or run exec zsh.
 
-                Show in Terminal asks to let MacCove control Terminal or iTerm the first time.
+                MacCove then asks to control Terminal or iTerm, whichever is open, to bring forward the \
+                window a command ran in.
                 """
             alert.addButton(withTitle: "Add to .zshrc")
             alert.addButton(withTitle: "Cancel")

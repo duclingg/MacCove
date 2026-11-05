@@ -64,7 +64,12 @@ enum ClaudeCodeSetup: AgentSetupProtocol {
         Hook(event: "Stop"),
         Hook(event: "SessionEnd"),
     ]
-    
+
+    static var hookEvents: [String] {
+        var seen: Set<String> = []
+        return hooks.map(\.event).filter { seen.insert($0).inserted }
+    }
+
     /// Writes the hook script and adds MacCove's hooks to Claude Code's
     /// settings, or brings an earlier setup up to date with hooks added
     /// since. The file is backed up first, and other hooks stay as they

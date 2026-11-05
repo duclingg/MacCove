@@ -31,30 +31,36 @@ actor MusicScripting {
 
     private var app: SBApplication?
 
-    /// `nil` when Music isn't running, has no current track, or the user
-    /// declined Automation access.
+    /// `nil` when Music isn't running, has no current track, or MacCove
+    /// hasn't been allowed to control it.
     func isFavorited() -> Bool? {
+        guard mayControl() else { return nil }
+        return favorited()
+    }
+
+    /// Returns whether Music accepted the change. Tapping the star is
+    /// asking for it, so this one may bring up macOS's prompt.
+    func setFavorited(_ favorited: Bool) -> Bool {
+        guard let track = currentTrack() else { return false }
+        track.setValue(favorited, forKey: "favorited")
+        return self.favorited() == favorited
+    }
+
+    private func favorited() -> Bool? {
         guard let track = currentTrack() else { return nil }
         return (track.value(forKey: "favorited") as? NSNumber)?.boolValue
     }
 
-    /// Returns whether Music accepted the change.
-    func setFavorited(_ favorited: Bool) -> Bool {
-        guard let track = currentTrack() else { return false }
-        track.setValue(favorited, forKey: "favorited")
-        return isFavorited() == favorited
-    }
-
     /// Seconds into the current track, read from Music's player itself.
     func playerPosition() -> Double? {
-        guard let app = runningApp() else { return nil }
+        guard mayControl(), let app = runningApp() else { return nil }
         return (app.value(forKey: "playerPosition") as? NSNumber)?.doubleValue
     }
 
     /// The devices Music is playing to through its own AirPlay picker,
     /// including the Mac itself (kind "computer") when it's one of them.
     func currentAirPlayDevices() -> [MusicAirPlayDevice]? {
-        guard let app = runningApp(),
+        guard mayControl(), let app = runningApp(),
               let devices = app.value(forKey: "currentAirPlayDevices") as? [SBObject] else { return nil }
         return devices.compactMap { device in
             guard let name = device.value(forKey: "name") as? String else { return nil }
@@ -65,6 +71,14 @@ actor MusicScripting {
 
     private func currentTrack() -> SBObject? {
         runningApp()?.value(forKey: "currentTrack") as? SBObject
+    }
+
+    /// Already allowed. What MacCove reads from Music by itself, while a
+    /// song plays, never brings up macOS's prompt: that's for Allow in the
+    /// welcome, or the star.
+    private func mayControl() -> Bool {
+        let target = NSAppleEventDescriptor(bundleIdentifier: Self.bundleIdentifier)
+        return AEDeterminePermissionToAutomateTarget(target.aeDesc, AEEventClass(typeWildCard), AEEventID(typeWildCard), false) == OSStatus(noErr)
     }
 
     private func runningApp() -> SBApplication? {

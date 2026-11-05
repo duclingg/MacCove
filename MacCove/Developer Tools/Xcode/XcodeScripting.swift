@@ -12,8 +12,9 @@ import ScriptingBridge
 /// workspace builds with.
 ///
 /// Apple Events are synchronous round trips to Xcode, so they run on this
-/// actor rather than the main thread. The first call triggers macOS's
-/// Automation prompt ("MacCove wants to control Xcode").
+/// actor rather than the main thread. The first call after Set Up brings
+/// up macOS's Automation prompt ("MacCove wants to control Xcode"); before
+/// Set Up, Xcode's Behaviors running old scripts never do.
 actor XcodeScripting {
     static let bundleIdentifier = "com.apple.dt.Xcode"
 
@@ -29,7 +30,7 @@ actor XcodeScripting {
     /// The workspace at `path`, or Xcode's active one when there's no path
     /// to look for or nothing matches it.
     func workspace(at path: String?) -> Workspace? {
-        guard let document = document(at: path) else { return nil }
+        guard mayAsk(), let document = document(at: path) else { return nil }
         let scheme = document.value(forKey: "activeScheme") as? SBObject
         let destination = document.value(forKey: "activeRunDestination") as? SBObject
         return Workspace(
@@ -49,6 +50,16 @@ actor XcodeScripting {
             return match
         }
         return app.value(forKey: "activeWorkspaceDocument") as? SBObject
+    }
+
+    /// Already allowed, or set up in MacCove, which says the first build
+    /// afterwards asks.
+    private func mayAsk() -> Bool {
+        if UserDefaults.standard.bool(forKey: XcodeBehaviorScripts.setUpKey) {
+            return true
+        }
+        let target = NSAppleEventDescriptor(bundleIdentifier: Self.bundleIdentifier)
+        return AEDeterminePermissionToAutomateTarget(target.aeDesc, AEEventClass(typeWildCard), AEEventID(typeWildCard), false) == OSStatus(noErr)
     }
 
     private func runningApp() -> SBApplication? {

@@ -53,6 +53,10 @@ enum CursorSetup: AgentSetupProtocol {
         "sessionEnd",
     ]
 
+    static var hookEvents: [String] {
+        events
+    }
+
     /// In seconds. Everything is reported, never waited on.
     private static let timeout = 5
 

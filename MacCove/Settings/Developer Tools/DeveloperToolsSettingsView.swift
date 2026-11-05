@@ -69,7 +69,7 @@ struct DeveloperToolsSettingsView: View {
 
     private func refreshXcode() {
         isXcodeInstalled = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode") != nil
-        hasXcodeScripts = XcodeBehaviorScripts.isInstalled()
+        hasXcodeScripts = XcodeBehaviorScripts.isSetUp
     }
 
     // MARK: View Components
@@ -140,6 +140,9 @@ struct DeveloperToolsSettingsView: View {
                     tool.setup.setup()
                 }
                 refresh(tool)
+                if !hasHooks, toolsWithHooks.contains(tool) {
+                    Task { await tool.askForPermissions() }
+                }
             }
             .disabled(!hasHooks && !installedTools.contains(tool))
         }
@@ -169,6 +172,9 @@ struct DeveloperToolsSettingsView: View {
                 Button("Set Up") {
                     XcodeBehaviorScripts.showSetup()
                     refreshXcode()
+                    if hasXcodeScripts {
+                        Task { await XcodeBehaviorScripts.askToControlXcode() }
+                    }
                 }
                 .disabled(!isXcodeInstalled)
             }
@@ -192,12 +198,16 @@ struct DeveloperToolsSettingsView: View {
             isOn: hasTerminalHook
         ) {
             Button(hasTerminalHook ? "Remove" : "Set Up") {
+                let wasInstalled = hasTerminalHook
                 if hasTerminalHook {
                     TerminalHook.remove()
                 } else {
                     TerminalHook.showSetup()
                 }
                 hasTerminalHook = TerminalHook.isInstalled()
+                if !wasInstalled, hasTerminalHook {
+                    Task { await TerminalWindow.askToControl() }
+                }
             }
         }
     }

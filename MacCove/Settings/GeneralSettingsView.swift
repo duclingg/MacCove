@@ -17,6 +17,7 @@ struct GeneralSettingsView: View {
 
     // MARK: States
     @Environment(MenuBarItem.self) private var menuBar
+    @Environment(NotchCommands.self) private var notch
     @State private var launchAtLogin = LaunchAtLogin()
     @State private var isConfirmingReset = false
 
@@ -55,10 +56,10 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                // The first-launch welcome isn't built yet.
                 LabeledContent {
-                    Button("Show") {}
-                        .disabled(true)
+                    Button("Show") {
+                        notch.showWelcome()
+                    }
                 } label: {
                     Text("Show Welcome Again")
                     Text("Runs the setup from the first launch.")
@@ -91,7 +92,7 @@ struct GeneralSettingsView: View {
     private static func resetAndRelaunch() {
         let defaults = UserDefaults.standard
         guard let domain = Bundle.main.bundleIdentifier else { return }
-        let kept = [GitHubSetup.sourceKey, GitHubSetup.repositoriesKey].compactMap { key in
+        let kept = [GitHubSetup.sourceKey, GitHubSetup.repositoriesKey, XcodeBehaviorScripts.setUpKey].compactMap { key in
             defaults.object(forKey: key).map { (key, $0) }
         }
         defaults.removePersistentDomain(forName: domain)
@@ -113,5 +114,6 @@ struct GeneralSettingsView: View {
 #Preview {
     GeneralSettingsView()
         .environment(MenuBarItem())
+        .environment(NotchCommands())
 }
 #endif

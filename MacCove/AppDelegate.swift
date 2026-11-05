@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var xcode: XcodeBuildMonitor?
     private var terminal: TerminalCommandMonitor?
     private var agentBridge: AgentBridge?
+    /// The welcome, while it's showing.
+    private var onboarding: OnboardingWindowController?
     private let music = MusicScripting()
     // Made here rather than at launch, so Settings has them too.
     private(set) lazy var nowPlaying = NowPlayingModel(music: music)
@@ -80,6 +82,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchCommands.showShelf = { [weak viewModel] in viewModel?.showShelf() }
         notchCommands.showDeviceBatteries = { [weak viewModel] in viewModel?.showDeviceBatteries() }
         notchCommands.showMirror = { [weak viewModel] in viewModel?.showMirror() }
+        notchCommands.showWelcome = { [weak self] in
+            self?.showOnboarding(location: .installed, isFirstRun: true)
+        }
         notchController = NotchWindowController(viewModel: viewModel)
         menuBarItem.showSettings = { [weak self] in self?.showSettings?() }
         menuBarItem.onOpen = { [weak self] in
@@ -126,6 +131,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forEventClass: AEEventClass(kInternetEventClass),
             andEventID: AEEventID(kAEGetURL)
         )
+
+        Task { [weak self] in
+            await self?.showOnboardingIfNeeded()
+        }
+    }
+
+    // MARK: - Welcome
+
+    /// The first time MacCove opens, and whenever it's opened straight from
+    /// its disk image.
+    private func showOnboardingIfNeeded() async {
+        guard !MenuBarItem.isRunningForPreviews else { return }
+        let location = await InstallLocation.current()
+        let isFirstRun = !OnboardingModel.isCompleted
+        guard isFirstRun || location == .diskImage else { return }
+        showOnboarding(location: location, isFirstRun: isFirstRun)
+    }
+
+    /// Hangs the welcome from the notch, in the notch's place until it
+    /// folds back up.
+    private func showOnboarding(location: InstallLocation, isFirstRun: Bool) {
+        if let onboarding {
+            onboarding.bringForward()
+            return
+        }
+        let model = OnboardingModel(
+            installLocation: location,
+            isFirstRun: isFirstRun,
+            calendar: calendar,
+            reminders: reminders,
+            mirror: mirror,
+            shelf: shelf,
+            deviceBatteries: deviceBatteries,
+            downloads: downloads,
+            github: github,
+            menuBarItem: menuBarItem,
+            setClipboardEnabled: { [weak self] enabled in
+                self?.setClipboardEnabled(enabled)
+            }
+        )
+        let controller = OnboardingWindowController(model: model)
+        controller.onClose = { [weak self] in
+            self?.onboarding = nil
+            self?.notchController?.isSuspended = false
+        }
+        onboarding = controller
+        notchController?.isSuspended = true
+        controller.show()
     }
     
     func setClipboardEnabled(_ enabled: Bool) {

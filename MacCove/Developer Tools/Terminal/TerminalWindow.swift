@@ -37,6 +37,15 @@ enum TerminalWindow {
         return error == nil ? tty : nil
     }
 
+    /// Set Up asks to control Terminal and iTerm, whichever are open, so
+    /// bringing a window forward later doesn't. One that isn't open asks
+    /// the first time a window of it is brought forward.
+    static func askToControl() async {
+        for app in [terminal, iTerm] where AutomationPermission.isRunning(app) {
+            _ = await AutomationPermission.request(app, openingHidden: false)
+        }
+    }
+
     private static func mayControl(_ appBundleIdentifier: String) -> Bool {
         let target = NSAppleEventDescriptor(bundleIdentifier: appBundleIdentifier)
         let status = AEDeterminePermissionToAutomateTarget(target.aeDesc, AEEventClass(typeWildCard), AEEventID(typeWildCard), false)

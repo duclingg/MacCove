@@ -37,6 +37,11 @@ enum XcodeBehaviorScripts {
         Script(fileName: "xcode-run-crashed.sh", event: "run-crashed", group: "Running", behavior: "Exits unexpectedly"),
     ]
 
+    /// Set Up was clicked in MacCove, so asking to control Xcode is
+    /// expected. Scripts left behind in Xcode's Behaviors alone don't
+    /// count. Read by `XcodeScripting`, off the main actor.
+    nonisolated static let setUpKey = "XcodeBehaviorsSetUp"
+
     static var directory: URL {
         ScriptsFolder.xcode.url
     }
@@ -52,6 +57,7 @@ enum XcodeBehaviorScripts {
         let urls: [URL]
         do {
             urls = try install()
+            UserDefaults.standard.set(true, forKey: setUpKey)
         } catch {
             NSApp.activate()
             NSAlert(error: error).runModal()
@@ -78,8 +84,7 @@ enum XcodeBehaviorScripts {
             The scripts’ folder is copied, ready to paste:
             \(path)
 
-            Set up only the ones you want. The first one afterwards asks to let MacCove control Xcode, \
-            for the scheme’s name and for Stop, Run and Test Again.
+            Set up only the ones you want. \(controlNote)
             """
         alert.addButton(withTitle: "Show Scripts in Finder")
         alert.addButton(withTitle: "Done")
@@ -89,12 +94,32 @@ enum XcodeBehaviorScripts {
         }
     }
 
+    /// Asked for once the setup's been explained, when Xcode is open.
+    private static var controlNote: String {
+        AutomationPermission.isRunning(XcodeScripting.bundleIdentifier)
+            ? "MacCove then asks to control Xcode, for the scheme’s name and for Stop, Run and Test Again."
+            : "The first one afterwards asks to let MacCove control Xcode, for the scheme’s name and for Stop, Run and Test Again."
+    }
+
+    /// After Set Up: asks to control Xcode, for the scheme's name and Stop,
+    /// Run and Test Again, if it's open. If not, the first build afterwards
+    /// asks.
+    static func askToControlXcode() async {
+        _ = await AutomationPermission.request(XcodeScripting.bundleIdentifier, openingHidden: false)
+    }
+
     private static var scriptURLs: [URL] {
         scripts.map { directory.appending(path: $0.fileName) }
     }
 
     /// The scripts are written, so Xcode's Behaviors can run them. MacCove
     /// can't see which Behaviors you pointed at them.
+    /// Set Up was clicked in MacCove and its scripts are there: what
+    /// Settings and the welcome show as On.
+    static var isSetUp: Bool {
+        UserDefaults.standard.bool(forKey: setUpKey) && isInstalled()
+    }
+
     static func isInstalled() -> Bool {
         scriptURLs.allSatisfy { FileManager.default.isExecutableFile(atPath: $0.path(percentEncoded: false)) }
     }
