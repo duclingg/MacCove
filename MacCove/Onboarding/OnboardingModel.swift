@@ -140,10 +140,12 @@ final class OnboardingModel {
     private(set) var installedAgents: [AITool] = []
     private(set) var agentsWithHooks: Set<AITool> = []
     private(set) var isXcodeInstalled = false
-    /// Every event added in Xcode's Behaviors.
-    private(set) var hasXcodeScripts = false
-    /// Set Up was clicked: the guide takes over in the notch once the
-    /// welcome has folded back into it.
+    /// Set up, with every event added in Xcode's Behaviors: On, from the
+    /// moment the guide sees the last one, rather than when the step's
+    /// next opened. Follows Xcode's settings as the guide reads them.
+    var hasXcodeScripts: Bool {
+        XcodeSetupProgress.shared.isComplete && XcodeBehaviorScripts.isSetUp
+    }
     private(set) var hasTerminalHook = false
     /// From the moment GitHub accepts the sign-in.
     var isGitHubConnected: Bool {
@@ -313,6 +315,8 @@ final class OnboardingModel {
     private func stepChanged(wasDone: Bool) {
         switch step {
         case .access:
+            // Already on from before the welcome shows as Allowed.
+            network.refresh()
             helper = LowPowerModeHelperSetup.access
             if AppMenuExtent.isAllowed {
                 accessibility = .allowed
@@ -626,7 +630,6 @@ final class OnboardingModel {
         agentsWithHooks = Set(AITool.allCases.filter { $0.setup.hooksSetup() })
         isXcodeInstalled = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode") != nil
         XcodeSetupProgress.shared.refreshBehaviors()
-        hasXcodeScripts = XcodeBehaviorScripts.isSetUp && XcodeSetupProgress.shared.isComplete
         hasTerminalHook = TerminalHook.isInstalled()
     }
 
@@ -635,6 +638,11 @@ final class OnboardingModel {
     func setUpXcode() {
         guard XcodeBehaviorScripts.prepare() else { return }
         xcode?.startGuide(staysOpen: true)
+        // macOS asks to let MacCove control Xcode now, with the card below
+        // its prompt, then the card takes focus back.
+        whileAsking {
+            await XcodeSetupProgress.shared.askToControlAtSetUp()
+        }
     }
 
     /// Xcode's guide is up, in the card.

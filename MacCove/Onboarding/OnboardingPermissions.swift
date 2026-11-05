@@ -101,10 +101,29 @@ final class LocalNetworkProbe {
     nonisolated private static let refusals: Set<Int32> = [-65555, -65570]
 
     init() {
-        // Asked before: check what was answered, which asks nothing.
-        if UserDefaults.standard.bool(forKey: AirPlayDeviceDirectory.hasBrowsedKey) {
+        refresh()
+    }
+
+    /// What it is now, before anything's clicked, when that can be found
+    /// out without macOS asking: once macOS has an answer, looking asks
+    /// nothing. Already on shows as Allowed, with nothing to click.
+    func refresh() {
+        guard access == .notAsked || access == .asked else { return }
+        if Self.hasAnswer || UserDefaults.standard.bool(forKey: AirPlayDeviceDirectory.hasBrowsedKey) {
             check()
         }
+    }
+
+    /// macOS keeps a record of each app it's asked about Local Network,
+    /// readable by anyone: MacCove in it means it's been answered, so a
+    /// search won't bring up the prompt. Reset All Settings doesn't clear
+    /// it, which is why this is looked at rather than MacCove's settings.
+    private static var hasAnswer: Bool {
+        guard let id = Bundle.main.bundleIdentifier,
+              let record = FileManager.default.contents(atPath: "/Library/Preferences/com.apple.networkextension.plist") else {
+            return false
+        }
+        return record.range(of: Data(id.utf8)) != nil
     }
 
     /// Allow: macOS asks if it never has; otherwise this finds out what

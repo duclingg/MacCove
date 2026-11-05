@@ -68,6 +68,9 @@ enum XcodeBehaviorScripts {
     static func guideInNotch() {
         guard prepare() else { return }
         XcodeSetupProgress.shared.guideInNotch()
+        Task {
+            await XcodeSetupProgress.shared.askToControlAtSetUp()
+        }
     }
 
     /// Writes the scripts and copies their folder's path. Says why in the

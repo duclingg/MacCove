@@ -184,6 +184,26 @@ final class XcodeSetupProgress {
         isXcodeOpen = AutomationPermission.isRunning(XcodeScripting.bundleIdentifier)
     }
 
+    /// As Set Up starts: macOS asks to let MacCove control Xcode now,
+    /// rather than at the first build. Only an open app can be asked
+    /// about, so Xcode opens first if it isn't, as the setup needs it to
+    /// be anyway. Answered already, nothing comes up.
+    func askToControlAtSetUp() async {
+        let id = XcodeScripting.bundleIdentifier
+        await refreshControl()
+        guard control == .notAsked else { return }
+        if !AutomationPermission.isRunning(id) {
+            control = .asking
+            XcodeCommand.open(workspacePath: nil)
+            // Xcode takes a while to open: up to a minute.
+            for _ in 0..<120 {
+                if AutomationPermission.isRunning(id) { break }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+        await askToControl()
+    }
+
     // MARK: - Text
 
     /// "Build, Testing › Starts": the groups that are done, then what's

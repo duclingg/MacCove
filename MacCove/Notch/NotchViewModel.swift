@@ -348,7 +348,19 @@ final class NotchViewModel {
     /// What's shown on its own, the island's first and the rest for the
     /// bubbles.
     var activities: [IslandActivity] {
-        Array(runningActivities.prefix(maxActivities))
+        // Back from the welcome: the bare notch for a moment, so what's
+        // running springs out of it instead of being there all at once.
+        guard !isEmerging else { return [] }
+        return Array(runningActivities.prefix(maxActivities))
+    }
+
+    /// Set by `NotchWindowController` as the notch comes back after the
+    /// welcome, which had its place, and cleared a moment later.
+    var isEmerging = false
+
+    /// Something to show, whether or not it's emerging yet.
+    var hasRunningActivities: Bool {
+        !runningActivities.isEmpty
     }
 
     /// Running past those, stacked as mini icons in the right bubble.
@@ -472,7 +484,8 @@ final class NotchViewModel {
     /// floating black pill, so it slides up off the top of the screen
     /// instead, unless Displays says to keep it there always.
     var isTuckedAway: Bool {
-        state == .idle && !hasPhysicalNotch && noNotchVisibility != .always
+        // Emerging, it's at the top edge where the welcome's pill just was.
+        state == .idle && !isEmerging && !hasPhysicalNotch && noNotchVisibility != .always
     }
 
     /// A small bar at the top edge, marking where the tucked-away island is.

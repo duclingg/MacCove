@@ -34,8 +34,22 @@ final class NotchWindowController {
     /// Out of the way while the welcome hangs from the notch in its place.
     var isSuspended = false {
         didSet {
-            if isSuspended != oldValue {
+            guard isSuspended != oldValue else { return }
+            guard !isSuspended else {
                 reposition()
+                return
+            }
+            // Shown first as the bare notch the welcome just folded into,
+            // then whatever's running animates out of it. With nothing
+            // running there's nothing to animate to.
+            viewModel.isEmerging = viewModel.hasRunningActivities
+            reposition()
+            Task { @MainActor [weak self] in
+                // A frame or so on screen as the notch.
+                try? await Task.sleep(for: .milliseconds(60))
+                withAnimation(.island) {
+                    self?.viewModel.isEmerging = false
+                }
             }
         }
     }
