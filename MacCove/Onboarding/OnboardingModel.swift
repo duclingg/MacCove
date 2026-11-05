@@ -122,7 +122,11 @@ final class OnboardingModel {
     private(set) var installedAgents: [AITool] = []
     private(set) var agentsWithHooks: Set<AITool> = []
     private(set) var isXcodeInstalled = false
+    /// Every event added in Xcode's Behaviors.
     private(set) var hasXcodeScripts = false
+    /// Set Up was clicked: the guide takes over in the notch once the
+    /// welcome has folded back into it.
+    private(set) var isXcodeGuidePending = false
     private(set) var hasTerminalHook = false
     private(set) var isGitHubConnected = false
 
@@ -496,22 +500,18 @@ final class OnboardingModel {
         installedAgents = AITool.allCases.filter { $0.setup.isInstalled() }
         agentsWithHooks = Set(AITool.allCases.filter { $0.setup.hooksSetup() })
         isXcodeInstalled = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode") != nil
-        hasXcodeScripts = XcodeBehaviorScripts.isSetUp
+        XcodeSetupProgress.shared.refreshBehaviors()
+        hasXcodeScripts = XcodeBehaviorScripts.isSetUp && XcodeSetupProgress.shared.isComplete
         hasTerminalHook = TerminalHook.isInstalled()
         isGitHubConnected = GitHubSetup.source != nil && !github.needsSignIn
     }
 
-    /// Connect Xcode, with the card lowered beneath it until it's closed.
-    /// Its own step asks to control Xcode. The welcome has the notch to
-    /// itself, so there's no guide there.
+    /// Xcode is set up in the notch, where the steps stay in view above
+    /// Xcode's Settings. The welcome has the notch until it's done, so the
+    /// scripts are written now and the guide starts as it folds away.
     func setUpXcode() {
-        whileAsking { [weak self] in
-            XcodeBehaviorScripts.showSetup(canGuideInNotch: false)
-            while XcodeSetupWindow.isOpen {
-                try? await Task.sleep(for: .milliseconds(300))
-            }
-            self?.refreshTools()
-        }
+        guard XcodeBehaviorScripts.prepare() else { return }
+        isXcodeGuidePending = true
     }
 
     func setUpTerminal() {

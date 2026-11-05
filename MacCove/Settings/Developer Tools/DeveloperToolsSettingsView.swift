@@ -152,8 +152,8 @@ struct DeveloperToolsSettingsView: View {
     private var xcodeSetup: XcodeSetupProgress { .shared }
 
     /// The row says what MacCove has heard from Xcode, so a half-done
-    /// setup is easy to finish: Set Up, then Continue until every event
-    /// has run, then On. Controlling Xcode turned off says so first.
+    /// setup is easy to finish: Set Up, in the notch, until every event is
+    /// added, then On. Controlling Xcode turned off says so first.
     private enum XcodeState {
         case notInstalled
         case notSetUp
@@ -177,8 +177,8 @@ struct DeveloperToolsSettingsView: View {
         case .cantControl: "Builds show without the scheme, Stop or Run"
         case .partly:
             xcodeSetup.count == 0
-                ? "Waiting for Xcode to run a script"
-                : "\(xcodeSetup.count) of \(xcodeSetup.total) working · \(xcodeSetup.summary)"
+                ? "Not added in Xcode’s Behaviors yet"
+                : "\(xcodeSetup.count) of \(xcodeSetup.total) added · \(xcodeSetup.summary)"
         case .on: "\(XcodeBehaviorScripts.scriptCount) scripts in \(ScriptsFolder.xcode.displayPath)"
         }
     }
@@ -200,22 +200,18 @@ struct DeveloperToolsSettingsView: View {
                 EmptyView()
             }
             switch xcodeState {
-            case .notSetUp, .notInstalled:
-                guideInNotchButton
-                    .disabled(xcodeState == .notInstalled)
+            case .notSetUp, .notInstalled, .partly:
+                // Setting up happens in the notch, where the steps stay in
+                // view above Xcode's Settings; it picks up where it was.
                 Button("Set Up") {
-                    XcodeBehaviorScripts.showSetup()
+                    XcodeBehaviorScripts.guideInNotch()
                     refreshXcode()
                 }
                 .disabled(xcodeState == .notInstalled)
-            case .partly:
-                guideInNotchButton
-                Button("Continue") {
-                    XcodeBehaviorScripts.showSetup()
-                }
+                .help("Shows the steps in the notch, where they stay in view above Xcode")
             case .on:
-                Button("Show Setup") {
-                    XcodeBehaviorScripts.showSetup()
+                Button("Show Scripts") {
+                    XcodeBehaviorScripts.showScripts()
                 }
             case .cantControl:
                 Button("Open Privacy Settings") {
@@ -224,17 +220,9 @@ struct DeveloperToolsSettingsView: View {
             }
         }
         .task {
+            xcodeSetup.refreshBehaviors()
             await xcodeSetup.refreshControl()
         }
-    }
-
-    /// The steps in the notch, above Xcode's Settings, without the window.
-    private var guideInNotchButton: some View {
-        Button("Guide in Notch") {
-            XcodeBehaviorScripts.guideInNotch()
-            refreshXcode()
-        }
-        .help("Set up with the steps in the notch, where they stay in view above Xcode")
     }
 
     private func statusDot(_ text: String, color: Color) -> some View {

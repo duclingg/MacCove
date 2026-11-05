@@ -7,7 +7,8 @@
 
 import SwiftUI
 
-/// The setup guide opened up in the notch. Setting up: the group it's on,
+/// The setup guide opened up in the notch. First: how to get to
+/// Behaviors in Xcode's Settings. Setting up: the group it's on,
 /// its events and their scripts, each ticking off as Xcode runs it, with
 /// the path and the rest of the steps a click away. As the first script
 /// runs: why macOS is asking to let MacCove control Xcode. All set: a
@@ -84,25 +85,35 @@ struct XcodeGuideView: View {
     private var title: String {
         if xcode.guide?.isAsking == true { return "Click OK to let MacCove control Xcode" }
         guard let group = xcode.guideGroup else { return "Xcode is connected" }
+        if isAtStart { return "Connect Xcode · Open Behaviors" }
         return "Connect Xcode · \(group)"
+    }
+
+    /// The first step, until Next or the first script runs.
+    private var isAtStart: Bool {
+        xcode.guide?.isAtStart == true && xcode.guideGroup != nil
     }
 
     private var subtitle: String {
         let setup = xcode.setup
         if xcode.guide?.isAsking == true { return "For the scheme’s name, and Stop and Run" }
         if xcode.guideGroup == nil {
-            return setup.isComplete ? "All \(setup.total) events working" : "\(setup.count) of \(setup.total) events working"
+            return setup.isComplete ? "All \(setup.total) events added" : "\(setup.count) of \(setup.total) events added"
         }
-        return "Run › Choose Script…, then ⇧⌘G and paste"
+        if isAtStart { return "Where MacCove’s scripts go in Xcode" }
+        return "Select one, turn on Run, Choose Script…, ⇧⌘G, paste"
     }
 
     // MARK: Rows
 
     private struct Row: Identifiable {
         enum Status {
-            case working
+            /// In Xcode's settings.
+            case added
             case next
-            case notRun
+            case notAdded
+            /// One of the first step's instructions, numbered.
+            case step(Int)
         }
 
         let id: String
@@ -118,13 +129,32 @@ struct XcodeGuideView: View {
         if guide.isAsking {
             guard let event = guide.lastEvent,
                   let script = XcodeBehaviorScripts.scripts.first(where: { $0.event == event }) else { return [] }
-            return [Row(id: script.event, text: "\(script.group) › \(script.behavior)", detail: "Xcode ran \(script.fileName)", status: .working)]
+            return [Row(id: script.event, text: "\(script.group) › \(script.behavior)", detail: "Xcode ran \(script.fileName)", status: .added)]
         }
         guard let group = xcode.guideGroup else { return [] }
+        if guide.isAtStart {
+            let first = XcodeBehaviorScripts.scripts.first
+            return [
+                Row(id: "settings", text: "Open Xcode’s Settings", detail: "Xcode › Settings…, or ⌘, in Xcode", status: .step(1)),
+                Row(id: "behaviors", text: "Click Behaviors", detail: "Along the top of the Settings window", status: .step(2)),
+                Row(
+                    id: "first",
+                    text: "Select \(first.map { "\($0.group) › \($0.behavior)" } ?? "Build › Starts")",
+                    detail: "In the list on the left, then click Next",
+                    status: .step(3)
+                ),
+            ]
+        }
         let scripts = XcodeBehaviorScripts.scripts(in: group)
-        let next = scripts.first { !xcode.setup.isWorking($0) }
+        let next = scripts.first { !xcode.setup.isSetUp($0) }
         return scripts.map { script in
-            let status: Row.Status = xcode.setup.isWorking(script) ? .working : script.id == next?.id ? .next : .notRun
+            let status: Row.Status = if xcode.setup.isAdded(script) {
+                .added
+            } else if script.id == next?.id {
+                .next
+            } else {
+                .notAdded
+            }
             return Row(id: script.event, text: script.behavior, detail: script.fileName, status: status)
         }
     }
@@ -142,18 +172,25 @@ struct XcodeGuideView: View {
             .lineLimit(1)
             Spacer(minLength: 8)
             switch row.status {
-            case .working:
-                Label("Working", systemImage: "checkmark")
+            case .added:
+                Label("Added", systemImage: "checkmark")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Color.islandSucceeded)
             case .next:
                 Text("Next")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Color.xcodeBuild)
-            case .notRun:
-                Text("Not run yet")
+            case .notAdded:
+                Text("Not added")
                     .font(.system(size: 12))
                     .foregroundStyle(.islandSecondary)
+            case let .step(number):
+                Text("\(number)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.xcodeBuild))
+                    .accessibilityLabel("Step \(number)")
             }
         }
         .frame(height: Self.rowHeight)
@@ -166,7 +203,17 @@ struct XcodeGuideView: View {
         HStack(spacing: 8) {
             if xcode.guide?.isAsking == true {
                 chip("Why It’s Needed") {
-                    XcodeSetupWindow.show(canGuideInNotch: true)
+                    XcodeSetupWindow.show()
+                }
+            } else if isAtStart {
+                chip("Open Xcode") {
+                    XcodeCommand.open(workspacePath: nil)
+                }
+                chip("All Steps") {
+                    XcodeSetupWindow.show()
+                }
+                chip("Next", background: .xcodeBuild, foreground: Color(red: 4 / 255, green: 23 / 255, blue: 46 / 255)) {
+                    xcode.continueGuide()
                 }
             } else if let group = xcode.guideGroup {
                 chip(copied ? "Copied" : "Copy Path") {
@@ -178,7 +225,7 @@ struct XcodeGuideView: View {
                     }
                 }
                 chip("All Steps") {
-                    XcodeSetupWindow.show(canGuideInNotch: true)
+                    XcodeSetupWindow.show()
                 }
                 chip("Skip \(group)") {
                     xcode.skip(group)

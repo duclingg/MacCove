@@ -19,6 +19,8 @@ enum XcodeBehaviorScripts {
         let fileName: String
         /// The last part of the URL.
         let event: String
+        /// Xcode's own name for the event, in its preferences.
+        let xcodeEvent: String
         /// As Xcode's Behaviors list them: the group, then the event.
         let group: String
         let behavior: String
@@ -27,15 +29,15 @@ enum XcodeBehaviorScripts {
     /// No spaces anywhere in the path: Xcode saves the script's location
     /// with them percent-encoded, then can't find "Build%20Started.sh".
     static let scripts = [
-        Script(fileName: "xcode-build-started.sh", event: "started", group: "Build", behavior: "Starts"),
-        Script(fileName: "xcode-build-succeeded.sh", event: "succeeded", group: "Build", behavior: "Succeeds"),
-        Script(fileName: "xcode-build-failed.sh", event: "failed", group: "Build", behavior: "Fails"),
-        Script(fileName: "xcode-test-started.sh", event: "test-started", group: "Testing", behavior: "Starts"),
-        Script(fileName: "xcode-test-succeeded.sh", event: "test-succeeded", group: "Testing", behavior: "Succeeds"),
-        Script(fileName: "xcode-test-failed.sh", event: "test-failed", group: "Testing", behavior: "Fails"),
-        Script(fileName: "xcode-run-started.sh", event: "run-started", group: "Running", behavior: "Starts"),
-        Script(fileName: "xcode-run-completed.sh", event: "run-completed", group: "Running", behavior: "Completes"),
-        Script(fileName: "xcode-run-crashed.sh", event: "run-crashed", group: "Running", behavior: "Exits unexpectedly"),
+        Script(fileName: "xcode-build-started.sh", event: "started", xcodeEvent: "BuildStart", group: "Build", behavior: "Starts"),
+        Script(fileName: "xcode-build-succeeded.sh", event: "succeeded", xcodeEvent: "BuildSucceeds", group: "Build", behavior: "Succeeds"),
+        Script(fileName: "xcode-build-failed.sh", event: "failed", xcodeEvent: "BuildFails", group: "Build", behavior: "Fails"),
+        Script(fileName: "xcode-test-started.sh", event: "test-started", xcodeEvent: "TestingStart", group: "Testing", behavior: "Starts"),
+        Script(fileName: "xcode-test-succeeded.sh", event: "test-succeeded", xcodeEvent: "TestingSucceeds", group: "Testing", behavior: "Succeeds"),
+        Script(fileName: "xcode-test-failed.sh", event: "test-failed", xcodeEvent: "TestingFails", group: "Testing", behavior: "Fails"),
+        Script(fileName: "xcode-run-started.sh", event: "run-started", xcodeEvent: "RunStart", group: "Running", behavior: "Starts"),
+        Script(fileName: "xcode-run-completed.sh", event: "run-completed", xcodeEvent: "RunCompletes", group: "Running", behavior: "Completes"),
+        Script(fileName: "xcode-run-crashed.sh", event: "run-crashed", xcodeEvent: "RunExitsUnexpectedly", group: "Running", behavior: "Exits unexpectedly"),
     ]
 
     /// Xcode's Behaviors groups, in the order it lists them.
@@ -59,28 +61,19 @@ enum XcodeBehaviorScripts {
     private static let oldDirectory = URL.applicationSupportDirectory.appending(path: "MacCove/Xcode", directoryHint: .isDirectory)
     private static let oldFileNames = ["Build Started.sh", "Build Succeeded.sh", "Build Failed.sh"]
 
-    /// Writes the scripts (again, in case they've changed), puts their
-    /// folder's path on the clipboard, then opens Connect Xcode, which
-    /// walks through Xcode's Behaviors and ticks each event off as Xcode
-    /// runs it. `canGuideInNotch` is off from the welcome, which has the
-    /// notch to itself.
-    static func showSetup(canGuideInNotch: Bool = true) {
-        guard prepare() else { return }
-        XcodeSetupWindow.show(canGuideInNotch: canGuideInNotch)
-    }
-
-    /// The same setup, straight to the guide in the notch, with no window:
-    /// Xcode comes forward for its Settings, and the steps stay in view
-    /// above it.
+    /// Set Up: writes the scripts (again, in case they've changed), puts
+    /// their folder's path on the clipboard, and starts the guide in the
+    /// notch. Nothing else moves: the steps stay in view above whatever's
+    /// in front, Xcode's Settings included.
     static func guideInNotch() {
         guard prepare() else { return }
-        XcodeCommand.open(workspacePath: nil)
         XcodeSetupProgress.shared.guideInNotch()
     }
 
     /// Writes the scripts and copies their folder's path. Says why in an
     /// alert when they can't be written.
-    private static func prepare() -> Bool {
+    @discardableResult
+    static func prepare() -> Bool {
         do {
             try install()
             UserDefaults.standard.set(true, forKey: setUpKey)

@@ -788,7 +788,9 @@ final class NotchViewModel {
     /// Whether what the activity comes from is in front: Xcode, Calendar,
     /// Reminders, the app playing, or the terminal tab a command or coding
     /// agent runs in. Any tab of that terminal when it can't say which. An
-    /// agent waiting for your answer stays, since its buttons answer it.
+    /// agent waiting for your answer stays, since its buttons answer it,
+    /// and so does Xcode's setup guide, which is there to be read above
+    /// Xcode's Settings.
     private func isInFront(_ activity: IslandActivity) -> Bool {
         guard let front = frontApp, let frontID = front.bundleIdentifier else { return false }
         func isFront(_ app: String?, tty: String?) -> Bool {
@@ -797,7 +799,7 @@ final class NotchViewModel {
             return tty == frontTTY
         }
         switch activity {
-        case .xcode: return frontID == XcodeScripting.bundleIdentifier
+        case .xcode: return xcode.guide == nil && frontID == XcodeScripting.bundleIdentifier
         case .terminal: return isFront(terminal.command?.appBundleIdentifier, tty: terminal.command?.tty)
         case .codingAgent: return !agents.needsAnswer && isFront(agents.session?.appBundleIdentifier, tty: agents.session?.tty)
         case .nowPlaying: return frontID == nowPlaying.track?.bundleIdentifier

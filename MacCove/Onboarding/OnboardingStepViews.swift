@@ -635,7 +635,9 @@ private struct ConnectStep: View {
             tiles.append(Tile(
                 id: "xcode", name: "Xcode", detail: "Scripts for Xcode’s Behaviors",
                 icon: .tool(ToolIcon(.xcode, size: 30)),
-                trailing: model.hasXcodeScripts ? .on : .button("Set Up", model.setUpXcode)
+                trailing: model.hasXcodeScripts
+                    ? .on
+                    : model.isXcodeGuidePending ? .status("Next, in the notch", Color.xcodeBuild) : .button("Set Up", model.setUpXcode)
             ))
         }
         tiles.append(Tile(

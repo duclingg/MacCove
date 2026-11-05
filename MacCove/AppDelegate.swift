@@ -181,6 +181,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onClose = { [weak self] in
             self?.onboarding = nil
             self?.notchController?.isSuspended = false
+            // Xcode's Set Up in the welcome carries on in the notch.
+            if model.isXcodeGuidePending {
+                XcodeSetupProgress.shared.guideInNotch()
+            }
         }
         onboarding = controller
         notchController?.isSuspended = true

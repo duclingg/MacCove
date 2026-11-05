@@ -8,19 +8,22 @@
 import AppKit
 import Observation
 
-/// How far Xcode's Behaviors are set up, from what MacCove has actually
-/// heard: each event counts as working the first time Xcode runs its
-/// script, and stays counted. Connect Xcode, the guide in the notch and
-/// Settings › Developer Tools all read it, so a half-done setup is easy to
-/// see and finish.
+/// How far Xcode's Behaviors are set up: each event counts once Xcode's
+/// own settings run MacCove's script for it, read from Xcode's
+/// preferences as you set it up. Connect Xcode, the guide in the notch
+/// and Settings › Developer Tools all read it, so a half-done setup is
+/// easy to see and finish.
 @Observable
 final class XcodeSetupProgress {
     static let shared = XcodeSetupProgress()
 
-    /// The events Xcode has run a script for, kept across launches.
-    static let seenKey = "XcodeBehaviorsSeen"
+    private static let xcodeDomain = "com.apple.dt.Xcode" as CFString
+    /// Behaviors are kept under Xcode's version, "Xcode.AlertEvents.17_0".
+    private static let alertEventsPrefix = "Xcode.AlertEvents."
 
-    private(set) var seen = Set(UserDefaults.standard.stringArray(forKey: XcodeSetupProgress.seenKey) ?? [])
+    /// The events whose Behavior runs MacCove's script for that event, as
+    /// Xcode's settings have it now.
+    private(set) var added: Set<String> = []
     /// Whether MacCove may control Xcode, for the scheme's name and Stop,
     /// Run and Test Again. Not Asked whenever Xcode is closed, since only
     /// an open app can say.
@@ -33,34 +36,93 @@ final class XcodeSetupProgress {
     /// Settings, from the guide once it's done.
     @ObservationIgnored var showSettings: () -> Void = {}
 
+    init() {
+        refreshBehaviors()
+    }
+
     var total: Int {
         XcodeBehaviorScripts.scripts.count
     }
 
+    /// Added in Xcode.
     var count: Int {
-        XcodeBehaviorScripts.scripts.filter { seen.contains($0.event) }.count
+        XcodeBehaviorScripts.scripts.filter(isSetUp).count
     }
 
     var isComplete: Bool {
         count == total
     }
 
-    func isWorking(_ script: XcodeBehaviorScripts.Script) -> Bool {
-        seen.contains(script.event)
+    func isAdded(_ script: XcodeBehaviorScripts.Script) -> Bool {
+        added.contains(script.event)
+    }
+
+    /// Added in Xcode's settings, which is all that counts.
+    func isSetUp(_ script: XcodeBehaviorScripts.Script) -> Bool {
+        isAdded(script)
     }
 
     func isGroupComplete(_ group: String) -> Bool {
-        XcodeBehaviorScripts.scripts(in: group).allSatisfy(isWorking)
+        XcodeBehaviorScripts.scripts(in: group).allSatisfy(isSetUp)
     }
 
-    /// Returns whether it's the first time this event's been heard.
-    @discardableResult
-    func record(_ event: String) -> Bool {
-        guard XcodeBehaviorScripts.scripts.contains(where: { $0.event == event }),
-              !seen.contains(event) else { return false }
-        seen.insert(event)
-        UserDefaults.standard.set(Array(seen).sorted(), forKey: Self.seenKey)
-        return true
+    // MARK: - Xcode's settings
+
+    /// Reads Xcode's Behaviors again: each event counts as added when Run
+    /// is on and points at MacCove's script with that event's name. Xcode
+    /// saves them as they're changed, so this keeps up while you set it
+    /// up.
+    func refreshBehaviors() {
+        CFPreferencesAppSynchronize(Self.xcodeDomain)
+        var found: Set<String> = []
+        if let events = Self.currentAlertEvents() {
+            for script in XcodeBehaviorScripts.scripts {
+                guard let event = events["Xcode.AlertEvent.\(script.xcodeEvent)"] as? [String: Any],
+                      let runScript = event["Xcode.Alert.RunScript"] as? [String: Any],
+                      Self.isEnabled(runScript["enabled"]),
+                      let path = runScript["path"] as? String,
+                      Self.isMacCoveScript(path, named: script.fileName) else { continue }
+                found.insert(script.event)
+            }
+        }
+        if found != added {
+            added = found
+        }
+    }
+
+    /// The Behaviors of the newest Xcode that has saved any.
+    private static func currentAlertEvents() -> [String: Any]? {
+        guard let keys = CFPreferencesCopyKeyList(xcodeDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String] else {
+            return nil
+        }
+        let newest = keys
+            .filter { $0.hasPrefix(alertEventsPrefix) }
+            .max { version(of: $0).lexicographicallyPrecedes(version(of: $1)) }
+        guard let newest else { return nil }
+        return CFPreferencesCopyAppValue(newest as CFString, xcodeDomain) as? [String: Any]
+    }
+
+    /// "Xcode.AlertEvents.17_0" → [17, 0].
+    private static func version(of key: String) -> [Int] {
+        key.dropFirst(alertEventsPrefix.count).split(separator: "_").compactMap { Int($0) }
+    }
+
+    /// Xcode keeps "1", but a Boolean would mean the same.
+    private static func isEnabled(_ value: Any?) -> Bool {
+        switch value {
+        case let string as String: string == "1" || string.lowercased() == "true"
+        case let number as NSNumber: number.boolValue
+        default: false
+        }
+    }
+
+    /// In MacCove's Xcode folder, under the script's name. Xcode may keep
+    /// the path percent-encoded.
+    private static func isMacCoveScript(_ path: String, named fileName: String) -> Bool {
+        let decoded = path.removingPercentEncoding ?? path
+        let url = URL(filePath: decoded)
+        return url.lastPathComponent == fileName
+            && url.deletingLastPathComponent().standardizedFileURL == XcodeBehaviorScripts.directory.standardizedFileURL
     }
 
     // MARK: - Controlling Xcode
@@ -85,13 +147,13 @@ final class XcodeSetupProgress {
     // MARK: - Text
 
     /// "Build, Testing › Starts": the groups that are done, then what's
-    /// working in the ones that aren't.
+    /// set up in the ones that aren't.
     var summary: String {
         XcodeBehaviorScripts.groups.compactMap { group -> String? in
-            let working = XcodeBehaviorScripts.scripts(in: group).filter(isWorking)
-            if working.isEmpty { return nil }
+            let setUp = XcodeBehaviorScripts.scripts(in: group).filter(isSetUp)
+            if setUp.isEmpty { return nil }
             if isGroupComplete(group) { return group }
-            return "\(group) › " + working.map(\.behavior).formatted(.list(type: .and))
+            return "\(group) › " + setUp.map(\.behavior).formatted(.list(type: .and))
         }
         .joined(separator: ", ")
     }

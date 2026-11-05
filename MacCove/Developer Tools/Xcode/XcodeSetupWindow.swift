@@ -8,12 +8,11 @@
 import AppKit
 import SwiftUI
 
-/// Connect Xcode: what Set Up opens. Xcode only runs scripts picked in its
-/// own settings, so MacCove can't connect itself; this walks through
-/// Xcode's Behaviors and ticks each event off the first time Xcode runs
-/// its script. Open Xcode or Guide Me in the Notch hands the same steps to
-/// the notch, which stays in view while Xcode's Settings window covers
-/// this one.
+/// Connect Xcode: every step at once, opened from the guide in the notch
+/// with All Steps or Why It's Needed. Xcode only runs scripts picked in its
+/// own settings, so MacCove can't connect itself; this shows them all and
+/// ticks each event off as it's added there. Setting up itself happens in
+/// the notch.
 enum XcodeSetupWindow {
     private static var window: NSWindow?
     private static var host: NSHostingController<XcodeSetupView>?
@@ -22,15 +21,14 @@ enum XcodeSetupWindow {
         window?.isVisible == true
     }
 
-    static func show(canGuideInNotch: Bool) {
-        let view = XcodeSetupView(progress: .shared, canGuideInNotch: canGuideInNotch) {
-            Self.window?.close()
-        }
-        if let existing = Self.window, let existingHost = Self.host {
-            existingHost.rootView = view
+    static func show() {
+        if let existing = Self.window {
             NSApp.activate()
             existing.makeKeyAndOrderFront(nil)
             return
+        }
+        let view = XcodeSetupView(progress: .shared) {
+            Self.window?.close()
         }
         let newHost = NSHostingController(rootView: view)
         newHost.sizingOptions = [.preferredContentSize]
@@ -38,6 +36,8 @@ enum XcodeSetupWindow {
         newWindow.title = "Connect Xcode"
         newWindow.styleMask = [.titled, .closable]
         newWindow.isReleasedWhenClosed = false
+        // Opened again later, it comes to the desktop you're on.
+        newWindow.collectionBehavior.insert(.moveToActiveSpace)
         newWindow.center()
         Self.window = newWindow
         Self.host = newHost
@@ -47,10 +47,9 @@ enum XcodeSetupWindow {
 }
 
 /// The window's contents: the scripts, the Behaviors to point at them with
-/// each event ticking off as it runs, and controlling Xcode.
+/// each event ticking off as it is added, and controlling Xcode.
 struct XcodeSetupView: View {
     let progress: XcodeSetupProgress
-    let canGuideInNotch: Bool
     let close: () -> Void
 
     @State private var isShowingHelp = false
@@ -74,6 +73,12 @@ struct XcodeSetupView: View {
         .frame(width: 720)
         .task {
             await progress.refreshControl()
+            // Xcode saves its Behaviors as they change: each ticks off
+            // while you set it up.
+            while !Task.isCancelled {
+                progress.refreshBehaviors()
+                try? await Task.sleep(for: .seconds(1.5))
+            }
         }
         // Xcode opened or quit: whether it can be asked about changes.
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
@@ -167,9 +172,6 @@ struct XcodeSetupView: View {
                     Spacer(minLength: 8)
                     Button("Open Xcode") {
                         XcodeCommand.open(workspacePath: nil)
-                        if canGuideInNotch {
-                            progress.guideInNotch()
-                        }
                     }
                     .controlSize(.small)
                 }
@@ -213,13 +215,13 @@ struct XcodeSetupView: View {
                             .truncationMode(.middle)
                     }
                     Spacer(minLength: 4)
-                    if progress.isWorking(script) {
-                        Label("Working", systemImage: "checkmark")
+                    if progress.isAdded(script) {
+                        Label("Added", systemImage: "checkmark")
                             .labelStyle(.titleAndIcon)
                             .font(.system(size: 11))
                             .foregroundStyle(.green)
                     } else {
-                        Text("Not run yet")
+                        Text("Not added")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                     }
@@ -295,11 +297,6 @@ struct XcodeSetupView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if canGuideInNotch, !progress.isComplete {
-                Button("Guide Me in the Notch") {
-                    progress.guideInNotch()
-                }
-            }
             Button("Done", action: close)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -310,12 +307,12 @@ struct XcodeSetupView: View {
         let count = progress.count
         let total = progress.total
         if count == 0 {
-            return "Try it: build in Xcode with ⌘B. Each event ticks the first time Xcode runs its script."
+            return "Each event ticks off as you add it in Xcode."
         }
         if count == total {
-            return "All \(total) working. You can close this window."
+            return "All \(total) added. You can close this window."
         }
-        return "\(count) of \(total) working. The rest are optional; add them any time from Settings."
+        return "\(count) of \(total) added. The rest are optional; add them any time from Settings."
     }
 }
 
