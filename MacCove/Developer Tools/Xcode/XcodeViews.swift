@@ -89,6 +89,14 @@ struct XcodeCompactView: View {
     /// Each wing of a failed pill: room for "12 errors".
     static let failedWingWidth: CGFloat = 77
 
+    /// The guide's pill has room for "4 of 9" until it's done.
+    static func width(for xcode: XcodeBuildMonitor, notch: CGSize) -> CGFloat {
+        if xcode.guide != nil {
+            return xcode.guideGroup == nil ? NotchViewModel.compactWidth(notch: notch) : notch.width + failedWingWidth * 2
+        }
+        return width(for: xcode.build, notch: notch)
+    }
+
     static func width(for build: XcodeBuildMonitor.Build?, notch: CGSize) -> CGFloat {
         if case .failed? = build?.phase {
             return notch.width + failedWingWidth * 2
@@ -103,14 +111,16 @@ struct XcodeCompactView: View {
         HStack(spacing: 0) {
             XcodeIcon(size: layout.artSize)
             Spacer(minLength: 0)
-            if let build {
+            if let guide = xcode.guide {
+                guideTrailing(guide, size: layout.artSize)
+            } else if let build {
                 trailing(build, size: layout.artSize)
             }
         }
         .padding(.horizontal, layout.sideInset)
-        .frame(width: Self.width(for: build, notch: notchSize), height: notchSize.height)
+        .frame(width: Self.width(for: xcode, notch: notchSize), height: notchSize.height)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(build.map { Self.accessibilityDescription($0) } ?? "Xcode")
+        .accessibilityLabel(xcode.guide != nil ? guideDescription : build.map { Self.accessibilityDescription($0) } ?? "Xcode")
         .accessibilityAddTraits(.isButton)
     }
 
@@ -139,6 +149,35 @@ struct XcodeCompactView: View {
                 .foregroundStyle(Color.islandSucceeded)
                 .frame(width: size, height: size)
         }
+    }
+
+    /// How many events have run, Allow in orange while macOS asks, or a
+    /// check once there's nothing left.
+    @ViewBuilder
+    private func guideTrailing(_ guide: XcodeBuildMonitor.Guide, size: CGFloat) -> some View {
+        if guide.isAsking {
+            Text("Allow")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.orange)
+                .lineLimit(1)
+        } else if xcode.guideGroup == nil {
+            Image(systemName: "checkmark")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Color.islandSucceeded)
+                .frame(width: size, height: size)
+        } else {
+            Text("\(xcode.setup.count) of \(xcode.setup.total)")
+                .font(.system(size: 15, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(Color.xcodeBuild)
+                .lineLimit(1)
+        }
+    }
+
+    private var guideDescription: String {
+        if xcode.guide?.isAsking == true { return "Connecting Xcode: allow MacCove to control Xcode" }
+        if xcode.guideGroup == nil { return "Xcode is connected" }
+        return "Connecting Xcode, \(xcode.setup.count) of \(xcode.setup.total) events working"
     }
 
     /// "3 errors", "2 failed", "Crashed", or "Failed" before anything has
@@ -230,6 +269,13 @@ struct XcodeExpandedView: View {
     private static let chipHeight: CGFloat = 36
     private static let bottomGap: CGFloat = 14
 
+    static func bodyHeight(for xcode: XcodeBuildMonitor) -> CGFloat {
+        if xcode.guide != nil {
+            return XcodeGuideView.bodyHeight(for: xcode)
+        }
+        return bodyHeight(for: xcode.build)
+    }
+
     /// Grows with what's showing: the bar while building or testing, the
     /// errors and the buttons once it's done.
     static func bodyHeight(for build: XcodeBuildMonitor.Build?) -> CGFloat {
@@ -252,9 +298,17 @@ struct XcodeExpandedView: View {
     }
 
     var body: some View {
+        if xcode.guide != nil {
+            XcodeGuideView(xcode: xcode, notchHeight: notchHeight)
+        } else {
+            buildBody
+        }
+    }
+
+    private var buildBody: some View {
         let build = xcode.build
 
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             if let build {
                 // Once a second for the time a run has been going.
                 TimelineView(.periodic(from: .now, by: 1)) { context in

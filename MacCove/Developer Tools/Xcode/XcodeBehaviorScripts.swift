@@ -14,7 +14,8 @@ import AppKit
 /// script in Xcode's own settings, so MacCove writes them and says where
 /// they go; nothing reaches the island until they're set up there.
 enum XcodeBehaviorScripts {
-    private struct Script {
+    struct Script: Identifiable {
+        var id: String { event }
         let fileName: String
         /// The last part of the URL.
         let event: String
@@ -25,7 +26,7 @@ enum XcodeBehaviorScripts {
 
     /// No spaces anywhere in the path: Xcode saves the script's location
     /// with them percent-encoded, then can't find "Build%20Started.sh".
-    private static let scripts = [
+    static let scripts = [
         Script(fileName: "xcode-build-started.sh", event: "started", group: "Build", behavior: "Starts"),
         Script(fileName: "xcode-build-succeeded.sh", event: "succeeded", group: "Build", behavior: "Succeeds"),
         Script(fileName: "xcode-build-failed.sh", event: "failed", group: "Build", behavior: "Fails"),
@@ -36,6 +37,13 @@ enum XcodeBehaviorScripts {
         Script(fileName: "xcode-run-completed.sh", event: "run-completed", group: "Running", behavior: "Completes"),
         Script(fileName: "xcode-run-crashed.sh", event: "run-crashed", group: "Running", behavior: "Exits unexpectedly"),
     ]
+
+    /// Xcode's Behaviors groups, in the order it lists them.
+    static let groups = ["Build", "Testing", "Running"]
+
+    static func scripts(in group: String) -> [Script] {
+        scripts.filter { $0.group == group }
+    }
 
     /// Set Up was clicked in MacCove, so asking to control Xcode is
     /// expected. Scripts left behind in Xcode's Behaviors alone don't
@@ -51,75 +59,59 @@ enum XcodeBehaviorScripts {
     private static let oldDirectory = URL.applicationSupportDirectory.appending(path: "MacCove/Xcode", directoryHint: .isDirectory)
     private static let oldFileNames = ["Build Started.sh", "Build Succeeded.sh", "Build Failed.sh"]
 
-    /// Writes the scripts (again, in case they've changed), then explains
-    /// how to set them up, with a button that shows them in Finder.
-    static func showSetup() {
-        let urls: [URL]
+    /// Writes the scripts (again, in case they've changed), puts their
+    /// folder's path on the clipboard, then opens Connect Xcode, which
+    /// walks through Xcode's Behaviors and ticks each event off as Xcode
+    /// runs it. `canGuideInNotch` is off from the welcome, which has the
+    /// notch to itself.
+    static func showSetup(canGuideInNotch: Bool = true) {
+        guard prepare() else { return }
+        XcodeSetupWindow.show(canGuideInNotch: canGuideInNotch)
+    }
+
+    /// The same setup, straight to the guide in the notch, with no window:
+    /// Xcode comes forward for its Settings, and the steps stay in view
+    /// above it.
+    static func guideInNotch() {
+        guard prepare() else { return }
+        XcodeCommand.open(workspacePath: nil)
+        XcodeSetupProgress.shared.guideInNotch()
+    }
+
+    /// Writes the scripts and copies their folder's path. Says why in an
+    /// alert when they can't be written.
+    private static func prepare() -> Bool {
         do {
-            urls = try install()
+            try install()
             UserDefaults.standard.set(true, forKey: setUpKey)
         } catch {
             NSApp.activate()
             NSAlert(error: error).runModal()
-            return
+            return false
         }
+        copyPath()
+        return true
+    }
 
-        // The folder is inside ~/Library, which Open panels hide, so its path
-        // goes on the clipboard for Go to Folder.
-        let path = directory.path(percentEncoded: false)
+    /// The folder is inside ~/Library, which Open panels hide, so its path
+    /// goes on the clipboard for Go to Folder.
+    static func copyPath() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(path, forType: .string)
-
-        let list = scripts
-            .map { "\($0.group) › \($0.behavior): \($0.fileName)" }
-            .joined(separator: "\n")
-        let alert = NSAlert()
-        alert.messageText = "Show Xcode Builds, Tests and Runs in the Island"
-        alert.informativeText = """
-            In Xcode, choose Settings › Behaviors. For each of these, select it, turn on Run, then click \
-            the menu beside it and choose Choose Script…. Press ⇧⌘G, paste, and pick the script:
-
-            \(list)
-
-            The scripts’ folder is copied, ready to paste:
-            \(path)
-
-            Set up only the ones you want. \(controlNote)
-            """
-        alert.addButton(withTitle: "Show Scripts in Finder")
-        alert.addButton(withTitle: "Done")
-        NSApp.activate()
-        if alert.runModal() == .alertFirstButtonReturn {
-            NSWorkspace.shared.activateFileViewerSelecting(urls)
-        }
-    }
-
-    /// Asked for once the setup's been explained, when Xcode is open.
-    private static var controlNote: String {
-        AutomationPermission.isRunning(XcodeScripting.bundleIdentifier)
-            ? "MacCove then asks to control Xcode, for the scheme’s name and for Stop, Run and Test Again."
-            : "The first one afterwards asks to let MacCove control Xcode, for the scheme’s name and for Stop, Run and Test Again."
-    }
-
-    /// After Set Up: asks to control Xcode, for the scheme's name and Stop,
-    /// Run and Test Again, if it's open. If not, the first build afterwards
-    /// asks.
-    static func askToControlXcode() async {
-        _ = await AutomationPermission.request(XcodeScripting.bundleIdentifier, openingHidden: false)
+        NSPasteboard.general.setString(directory.path(percentEncoded: false), forType: .string)
     }
 
     private static var scriptURLs: [URL] {
         scripts.map { directory.appending(path: $0.fileName) }
     }
 
-    /// The scripts are written, so Xcode's Behaviors can run them. MacCove
-    /// can't see which Behaviors you pointed at them.
-    /// Set Up was clicked in MacCove and its scripts are there: what
-    /// Settings and the welcome show as On.
+    /// Set Up was clicked in MacCove and its scripts are there. Which of
+    /// Xcode's Behaviors run them is up to `XcodeSetupProgress`.
     static var isSetUp: Bool {
         UserDefaults.standard.bool(forKey: setUpKey) && isInstalled()
     }
 
+    /// The scripts are written, so Xcode's Behaviors can run them. MacCove
+    /// can't see which Behaviors you pointed at them.
     static func isInstalled() -> Bool {
         scriptURLs.allSatisfy { FileManager.default.isExecutableFile(atPath: $0.path(percentEncoded: false)) }
     }
@@ -133,6 +125,7 @@ enum XcodeBehaviorScripts {
         NSWorkspace.shared.activateFileViewerSelecting(scriptURLs)
     }
 
+    @discardableResult
     private static func install() throws -> [URL] {
         removeOldScripts()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -92,7 +92,7 @@ struct GeneralSettingsView: View {
     private static func resetAndRelaunch() {
         let defaults = UserDefaults.standard
         guard let domain = Bundle.main.bundleIdentifier else { return }
-        let kept = [GitHubSetup.sourceKey, GitHubSetup.repositoriesKey, XcodeBehaviorScripts.setUpKey].compactMap { key in
+        let kept = [GitHubSetup.sourceKey, GitHubSetup.repositoriesKey, XcodeBehaviorScripts.setUpKey, XcodeSetupProgress.seenKey].compactMap { key in
             defaults.object(forKey: key).map { (key, $0) }
         }
         defaults.removePersistentDomain(forName: domain)

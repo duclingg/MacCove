@@ -501,13 +501,16 @@ final class OnboardingModel {
         isGitHubConnected = GitHubSetup.source != nil && !github.needsSignIn
     }
 
+    /// Connect Xcode, with the card lowered beneath it until it's closed.
+    /// Its own step asks to control Xcode. The welcome has the notch to
+    /// itself, so there's no guide there.
     func setUpXcode() {
-        belowAlerts(false, { XcodeBehaviorScripts.showSetup() }) { [weak self] in
-            guard let self else { return }
-            self.refreshTools()
-            if self.hasXcodeScripts {
-                self.whileAsking { await XcodeBehaviorScripts.askToControlXcode() }
+        whileAsking { [weak self] in
+            XcodeBehaviorScripts.showSetup(canGuideInNotch: false)
+            while XcodeSetupWindow.isOpen {
+                try? await Task.sleep(for: .milliseconds(300))
             }
+            self?.refreshTools()
         }
     }
 

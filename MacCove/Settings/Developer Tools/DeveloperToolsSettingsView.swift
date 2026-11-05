@@ -149,36 +149,101 @@ struct DeveloperToolsSettingsView: View {
     }
 
     // MARK: Editors and terminal
+    private var xcodeSetup: XcodeSetupProgress { .shared }
+
+    /// The row says what MacCove has heard from Xcode, so a half-done
+    /// setup is easy to finish: Set Up, then Continue until every event
+    /// has run, then On. Controlling Xcode turned off says so first.
+    private enum XcodeState {
+        case notInstalled
+        case notSetUp
+        case cantControl
+        case partly
+        case on
+    }
+
+    private var xcodeState: XcodeState {
+        if !hasXcodeScripts {
+            return isXcodeInstalled ? .notSetUp : .notInstalled
+        }
+        if xcodeSetup.control == .denied { return .cantControl }
+        return xcodeSetup.isComplete ? .on : .partly
+    }
+
     private var xcodeDetail: String {
-        if hasXcodeScripts {
-            "\(XcodeBehaviorScripts.scriptCount) scripts in \(ScriptsFolder.xcode.displayPath)"
-        } else if isXcodeInstalled {
-            "Scripts for Xcode’s Behaviors"
-        } else {
-            "Install Xcode to use this"
+        switch xcodeState {
+        case .notInstalled: "Install Xcode to use this"
+        case .notSetUp: "Scripts for Xcode’s Behaviors"
+        case .cantControl: "Builds show without the scheme, Stop or Run"
+        case .partly:
+            xcodeSetup.count == 0
+                ? "Waiting for Xcode to run a script"
+                : "\(xcodeSetup.count) of \(xcodeSetup.total) working · \(xcodeSetup.summary)"
+        case .on: "\(XcodeBehaviorScripts.scriptCount) scripts in \(ScriptsFolder.xcode.displayPath)"
         }
     }
 
-    /// Xcode can only be pointed at the scripts from its own settings, so
-    /// Set Up writes them and says where they go, and there's nothing for
-    /// MacCove to remove.
     private var xcodeRow: some View {
-        toolRow("Xcode", icon: ToolIcon(.xcode), detail: xcodeDetail, isOn: hasXcodeScripts) {
-            if hasXcodeScripts {
-                Button("Show Scripts") {
-                    XcodeBehaviorScripts.showScripts()
-                }
-            } else {
+        HStack(spacing: 12) {
+            toolLabel("Xcode", detail: xcodeDetail) {
+                ToolIcon(.xcode)
+            }
+            Spacer(minLength: 0)
+            switch xcodeState {
+            case .on:
+                onStatus
+            case .partly:
+                statusDot("Partly set up", color: .orange)
+            case .cantControl:
+                statusDot("Can’t control Xcode", color: .red)
+            case .notSetUp, .notInstalled:
+                EmptyView()
+            }
+            switch xcodeState {
+            case .notSetUp, .notInstalled:
+                guideInNotchButton
+                    .disabled(xcodeState == .notInstalled)
                 Button("Set Up") {
                     XcodeBehaviorScripts.showSetup()
                     refreshXcode()
-                    if hasXcodeScripts {
-                        Task { await XcodeBehaviorScripts.askToControlXcode() }
-                    }
                 }
-                .disabled(!isXcodeInstalled)
+                .disabled(xcodeState == .notInstalled)
+            case .partly:
+                guideInNotchButton
+                Button("Continue") {
+                    XcodeBehaviorScripts.showSetup()
+                }
+            case .on:
+                Button("Show Setup") {
+                    XcodeBehaviorScripts.showSetup()
+                }
+            case .cantControl:
+                Button("Open Privacy Settings") {
+                    AutomationPermission.openSettings()
+                }
             }
         }
+        .task {
+            await xcodeSetup.refreshControl()
+        }
+    }
+
+    /// The steps in the notch, above Xcode's Settings, without the window.
+    private var guideInNotchButton: some View {
+        Button("Guide in Notch") {
+            XcodeBehaviorScripts.guideInNotch()
+            refreshXcode()
+        }
+        .help("Set up with the steps in the notch, where they stay in view above Xcode")
+    }
+
+    private func statusDot(_ text: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .frame(width: 8, height: 8)
+            Text(text)
+        }
+        .foregroundStyle(color)
     }
 
     /// The design's MacCove extension for VS Code doesn't exist yet.

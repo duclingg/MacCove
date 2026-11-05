@@ -59,6 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let agents = AgentMonitor()
         self.xcode = xcode
         self.terminal = terminal
+        XcodeSetupProgress.shared.guideInNotch = { [weak xcode] in
+            xcode?.startGuide()
+        }
+        XcodeSetupProgress.shared.showSettings = { [weak self] in
+            self?.showSettings?()
+        }
         let viewModel = NotchViewModel(
             nowPlaying: nowPlaying,
             audioRoute: audioRoute,

@@ -381,7 +381,7 @@ final class NotchViewModel {
         if isShowingAll, mirror.isOpen {
             running.append(.mirror)
         }
-        if isShowingAll, xcode.build != nil {
+        if isShowingAll, xcode.isShown {
             running.append(.xcode)
         }
         if isShowingAll, agents.session != nil, !agents.needsAnswer {
@@ -506,7 +506,7 @@ final class NotchViewModel {
         case .compact:
             let width = switch primary {
             case .charging?: Self.chargingWidth(notch: notch)
-            case .xcode?: XcodeCompactView.width(for: xcode.build, notch: notch)
+            case .xcode?: XcodeCompactView.width(for: xcode, notch: notch)
             case .terminal?: TerminalCompactView.width(for: terminal.command, notch: notch)
             case .calendar?: CalendarCompactView.width(for: calendar, notch: notch)
             case .reminders?: RemindersCompactView.width(for: reminders, notch: notch)
@@ -523,7 +523,7 @@ final class NotchViewModel {
         case .expanded:
             let body = switch primary {
             case .nowPlaying?: Self.expandedBodyHeight
-            case .xcode?: XcodeExpandedView.bodyHeight(for: xcode.build)
+            case .xcode?: XcodeExpandedView.bodyHeight(for: xcode)
             case .terminal?: TerminalExpandedView.bodyHeight(for: terminal.command)
             case .codingAgent?: AgentExpandedView.bodyHeight(for: agents.session)
             case .github?: GitHubExpandedView.bodyHeight(for: github)
