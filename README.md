@@ -1,8 +1,6 @@
 <div align="center">
 
-<!-- App icon: save a 256×256 PNG as docs/icon.png, then uncomment this line.
 <img src="docs/icon.png" width="128" alt="MacCove icon">
--->
 
 # MacCove
 
