@@ -69,3 +69,7 @@ fastlane/test_output
 !contents.xcworkspacedata
 !Package.resolved
 !Configuration/Info.plist
+
+# Release output
+dist/
+*.dmg
