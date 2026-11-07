@@ -60,6 +60,19 @@ final class NotchWindowController {
         }
     }
     private var workspaceObservers: [NSObjectProtocol] = []
+    /// A desktop switch under way: the notch stays put while the desktops
+    /// slide, and what changes with the app in front waits until they've
+    /// stopped.
+    private var spaceSettle: Task<Void, Never>?
+    /// An app coming to the front, held back a moment in case it's part of
+    /// a desktop switch.
+    private var appActivation: Task<Void, Never>?
+    /// The desktops are still sliding for about this long after macOS says
+    /// the switch has happened.
+    private static let spaceSlideDuration: Duration = .milliseconds(500)
+    /// macOS can bring the new desktop's app to the front just before it
+    /// says the desktop has changed; this is long enough to hear that it has.
+    private static let appActivationDelay: Duration = .milliseconds(150)
     private var fullScreenCheck: Task<Void, Never>?
     private var menuMeasurement: Task<Void, Never>?
     private var activityCount = 0
@@ -163,15 +176,12 @@ final class NotchWindowController {
         // Going in and out of full screen switches Spaces; switching apps can
         // bring a full-screen one to the front, and brings its own menus.
         let workspace = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
-            workspaceObservers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.scheduleFullScreenCheck()
-                    self?.measureAppMenus()
-                    self?.frontAppChanged()
-                }
-            })
-        }
+        workspaceObservers.append(workspace.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.spaceChanged() }
+        })
+        workspaceObservers.append(workspace.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.appActivated() }
+        })
         scheduleFullScreenCheck()
         frontAppChanged()
         observeActivityCount()
@@ -207,6 +217,41 @@ final class NotchWindowController {
         lockPanel.orderFrontRegardless()
         LockScreenSpace.move(lockPanel)
         lockScreenPanel = lockPanel
+    }
+
+    /// Switching desktops, macOS doesn't redraw the notch smoothly while the
+    /// desktops slide, so changes made then would jump. It keeps showing
+    /// what it showed, and catches up with the new desktop's app once the
+    /// slide has finished, animating the change as usual.
+    private func spaceChanged() {
+        appActivation?.cancel()
+        spaceSettle?.cancel()
+        spaceSettle = Task { [weak self] in
+            try? await Task.sleep(for: Self.spaceSlideDuration)
+            guard !Task.isCancelled, let self else { return }
+            self.spaceSettle = nil
+            self.frontMayHaveChanged()
+        }
+    }
+
+    /// Switching apps without switching desktops: as good as straight away.
+    /// During a desktop switch, the switch's own catch-up covers it.
+    private func appActivated() {
+        guard spaceSettle == nil else { return }
+        appActivation?.cancel()
+        appActivation = Task { [weak self] in
+            try? await Task.sleep(for: Self.appActivationDelay)
+            guard !Task.isCancelled, let self, self.spaceSettle == nil else { return }
+            self.frontMayHaveChanged()
+        }
+    }
+
+    /// The app in front may be different: it may be full screen, it brings
+    /// its own menus, and activities from it step aside.
+    private func frontMayHaveChanged() {
+        scheduleFullScreenCheck()
+        measureAppMenus()
+        frontAppChanged()
     }
 
     /// Checks now, and again once the full-screen animation has had time to

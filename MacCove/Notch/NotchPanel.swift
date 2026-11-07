@@ -31,7 +31,9 @@ final class NotchPanel: NSPanel {
         acceptsMouseMovedEvents = true
         // Clicks pass through until the cursor is over the island itself.
         ignoresMouseEvents = true
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // Transient: macOS hides it while Mission Control or App Exposé is
+        // up, in step with them, and puts it back when you return.
+        collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary, .ignoresCycle]
     }
 
     override var canBecomeKey: Bool { false }
