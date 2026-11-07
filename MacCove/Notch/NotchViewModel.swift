@@ -720,12 +720,11 @@ final class NotchViewModel {
         notch.width + chargingWingWidth * 2
     }
 
-    /// Each wing of the sign-in pill: the lock on the left and the
-    /// fingerprint or check on the right.
-    static let signInWingWidth: CGFloat = 56
-
+    /// The sign-in pill: the lock on the left and the fingerprint or check
+    /// on the right, each in the room a pill's artwork has, so it's no
+    /// wider than any other pill.
     static func signInWidth(notch: CGSize) -> CGFloat {
-        notch.width + signInWingWidth * 2
+        compactWidth(notch: notch)
     }
 
     // MARK: - Interaction

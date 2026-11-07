@@ -273,7 +273,7 @@ struct SignInCompactView: View {
             Spacer(minLength: 0)
             TouchIDGlyph(size: 21, display: display)
         }
-        .padding(.horizontal, layout.sideInset + 4)
+        .padding(.horizontal, layout.sideInset)
         .frame(width: NotchViewModel.signInWidth(notch: notchSize), height: notchSize.height)
         .modifier(SignInSequence(prompt: signIn.prompt, display: $display))
         .accessibilityElement(children: .ignore)
