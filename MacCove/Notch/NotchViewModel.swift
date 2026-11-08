@@ -490,9 +490,18 @@ final class NotchViewModel {
     }
 
     /// Whether the hover strip has anything to bring back: the island is
-    /// tucked away but media is still around (paused, say).
+    /// tucked away but media is still around (paused, say), or something
+    /// swiped away is still running.
     var canRevealOnHover: Bool {
-        isTuckedAway && nowPlaying.hasMedia
+        isTuckedAway && (nowPlaying.hasMedia || lastHiddenToShow != nil)
+    }
+
+    /// The latest activity swiped away that would show if it came back
+    /// now: still running, and not stepped aside for the app in front.
+    private var lastHiddenToShow: IslandActivity? {
+        guard !hiddenActivities.isEmpty else { return nil }
+        let running = runningActivities(includingHidden: true)
+        return hiddenActivities.last { running.contains($0) && !isInFront($0) }
     }
 
     var geometry: IslandGeometry {
@@ -900,8 +909,17 @@ final class NotchViewModel {
     }
 
     /// The cursor reached the hover strip: slide the island down under it.
+    /// With the last activity swiped away, it comes back for good, as a
+    /// swipe out would, so a mouse can bring it back too. Otherwise paused
+    /// media shows while the cursor stays.
     func revealFromHoverStrip() {
         guard canRevealOnHover else { return }
+        if let activity = lastHiddenToShow {
+            unhide(activity)
+            return
+        }
+        // Swiped away and then paused: out of sight twice over.
+        unhide(.nowPlaying)
         isRevealedByHover = true
         setHovering(primaryActivity)
     }
