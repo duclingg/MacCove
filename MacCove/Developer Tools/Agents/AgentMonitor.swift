@@ -139,6 +139,10 @@ final class AgentMonitor {
         var updatedAt = Date.now
         /// Hidden once dismissed, until its next prompt.
         var isShown = true
+        /// A plan approved from the island: its first edit is allowed and
+        /// switches Claude Code to accepting edits, as its own "Yes,
+        /// auto-accept edits" does, so the rest don't ask either.
+        var acceptsEditsAfterPlan = false
 
         var project: String {
             (folder as NSString).lastPathComponent
@@ -189,6 +193,8 @@ final class AgentMonitor {
     private static let answerTimeout: Duration = .seconds(590)
     /// Asked through their own hook, which waits for the island.
     private static let toolsThatAsk: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
+    /// What Claude Code's accepting edits lets through without asking.
+    private static let editTools: Set<String> = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
     private static let processCheckInterval: Duration = .seconds(5)
 
     // MARK: - Hook events
@@ -328,9 +334,11 @@ final class AgentMonitor {
         answerCurrent(of: question, with: labels.joined(separator: ", "))
     }
 
-    /// Starts on the plan. Claude Code wants the plan echoed back.
+    /// Starts on the plan, accepting its edits without asking. Claude Code
+    /// wants the plan echoed back.
     func approvePlan() {
-        guard case let .plan(plan)? = session?.phase else { return }
+        guard let shown = session, case let .plan(plan) = shown.phase else { return }
+        sessions[shown.id]?.acceptsEditsAfterPlan = true
         answer(Self.preToolUse(["permissionDecision": "allow", "updatedInput": plan.input]))
     }
 
@@ -398,6 +406,7 @@ final class AgentMonitor {
         session.finishedAt = nil
         session.phase = .working
         session.isShown = true
+        session.acceptsEditsAfterPlan = false
         session.updatedAt = .now
         Self.attach(request, to: &session)
         sessions[id] = session
@@ -485,6 +494,14 @@ final class AgentMonitor {
     private func requestApproval(_ id: String, input: [String: Any], request: AgentBridge.Request) async -> AgentBridge.Response {
         let tool = input["tool_name"] as? String ?? "Tool"
         guard !Self.toolsThatAsk.contains(tool) else { return .empty }
+        // A hook's approval of a plan leaves Claude Code asking about every
+        // edit, so the first one after it asks for edits to be accepted.
+        if Self.agent(of: request) == .claude, Self.editTools.contains(tool), sessions[id]?.acceptsEditsAfterPlan == true {
+            sessions[id]?.acceptsEditsAfterPlan = false
+            return Self.decision(behavior: "allow", extra: [
+                "updatedPermissions": [["type": "setMode", "mode": "acceptEdits", "destination": "session"]],
+            ])
+        }
         let toolInput = input["tool_input"] as? [String: Any] ?? [:]
         // Codex turns down a decision that adds rules, so it gets no
         // Always Allow.
